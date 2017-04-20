@@ -8,7 +8,7 @@
 /**
  * Function has local minima: 1 at (-1, -1) and 1 at (1, 1), saddle point at (0, 0)
  */
-class SaddleFunc : public LossAndGradientFunctor<double> {
+class SaddleFunc : public ModelGradientFunctor<double> {
 public:
     SaddleFunc(arma::Row<double> & x_) : x(x_), dx(2) {
         if (x_.n_elem != 2) {
@@ -23,6 +23,10 @@ public:
         dx[0] = 4 * x1 - 4 * x2;
         dx[1] = - 4 * x1 + 4 * pow(x2, 3);
         return std::pair<double, arma::Row<double> *>(loss, &dx);
+    }
+
+    virtual arma::Row<double> * getModel() {
+        return &x;
     }
 
 private:
@@ -51,7 +55,7 @@ void testSaddleFuncForSolver(const SgdSolverType & solverType) {
     x = {-0.5, -0.5};
     solver = solverBuilder.build();
     SaddleFunc sf(x);
-    solver->sgdWithExternalModel(sf, x);
+    solver->sgd(sf);
     delete solver;
 
     xExpected = { -1.0, -1.0 };
@@ -60,7 +64,7 @@ void testSaddleFuncForSolver(const SgdSolverType & solverType) {
     // trapped at the saddle point!
     x[0] = 0.0; x[1] = 0.0;
     solver = solverBuilder.build();
-    solver->sgdWithExternalModel(sf, x);
+    solver->sgd(sf);
     delete solver;
 
     xExpected = { 0.0, 0.0 };
@@ -69,7 +73,7 @@ void testSaddleFuncForSolver(const SgdSolverType & solverType) {
     // but a tiny bit off the saddle point it follows the hill
     x[0] = 0.0; x[1] = 1e-7;
     solver = solverBuilder.build();
-    solver->sgdWithExternalModel(sf, x);
+    solver->sgd(sf);
     delete solver;
 
     xExpected = { 1.0, 1.0 };
@@ -104,9 +108,9 @@ void testProjectionSumLoss() {
     arma::Row<double> gradientVec(gradientBuffer, numP, false, true);
 
     arma::arma_rng::set_seed(47);
-    x.randu();
-    yTrue.randu();
-    modelVec.randu();
+    x.randn();
+    yTrue.randn();
+    modelVec.randn();
 
     ProjectionSumLoss<double> lossNN(dimX);
     lossNN.initParamsStorage(&modelVec, &gradientVec);
@@ -130,7 +134,6 @@ void testProjectionSumLoss() {
 
     // verify that underlying memory buffer is the same after SGD
     assert(modelBuffer == mgf.getModel()->memptr());
-    assert(gradientBuffer == mgf.getModelGradient()->memptr());
 
     delete solver;
 }

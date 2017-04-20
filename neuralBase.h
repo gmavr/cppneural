@@ -59,7 +59,7 @@ class CoreNN {
 public:
     CoreNN(uint32_t numParameters)
         : modelStorageSet(false), model(nullptr),
-          modelGradStorageSet(false), modelGrad(nullptr),
+          modelGradientStorageSet(false), modelGrad(nullptr),
           inputGrad(new arma::Mat<T>()), x(nullptr),
           numP(numParameters) {
     }
@@ -102,7 +102,7 @@ public:
      */
     void setModelStorage(arma::Row<T> * modelVector) {
         if (modelStorageSet || model != nullptr) {
-            throw std::runtime_error("Attempt to setModelStorage when storage already set");
+            throw std::logic_error("Attempt to setModelStorage when storage already set");
         }
         model = setParam(modelVector);
         modelStorageSet = true;
@@ -118,11 +118,11 @@ public:
      * network component inside this enclosing components gradient memory buffer.
      */
     void setGradientStorage(arma::Row<T> * gradientVector) {
-        if (modelGradStorageSet || modelGrad != nullptr) {
-            throw std::runtime_error("Attempt to setGradientStorage when storage already set");
+        if (modelGradientStorageSet || modelGrad != nullptr) {
+            throw std::logic_error("Attempt to setGradientStorage when storage already set");
         }
         modelGrad = setParam(gradientVector);
-        modelGradStorageSet = true;
+        modelGradientStorageSet = true;
         setGradientReferencesInPlace();
     }
 
@@ -132,7 +132,7 @@ public:
      */
     inline arma::Row<T> * getModel() {
         if (!modelStorageSet) {
-            throw std::runtime_error("Attempt to getModel() when storage not set");
+            throw std::logic_error("Attempt to getModel() when storage not set");
         }
         return model;
     }
@@ -142,8 +142,8 @@ public:
      * Returned pointed object owned by this object, caller may not delete it.
      */
     inline arma::Row<T> * getModelGradient() {
-        if (!modelStorageSet) {
-            throw std::runtime_error("Attempt to getModelGradient() when storage not set");
+        if (!modelGradientStorageSet) {
+            throw std::logic_error("Attempt to getModelGradient() when storage not set");
         }
         return modelGrad;
     }
@@ -160,6 +160,15 @@ public:
         return this->x;
     }
 
+    inline bool isModelStorageSet() const {
+        return modelStorageSet;
+    }
+
+    inline bool isModelGradientStorageSet() const {
+        return modelGradientStorageSet;
+    }
+
+private:
     /*
      * Recursively set up enclosed component model memory references to appropriate locations
      * inside this object's model buffer.
@@ -172,7 +181,6 @@ public:
      */
     virtual void setGradientReferencesInPlace() = 0;
 
-private:
     arma::Row<T> * setParam(arma::Row<T> * paramVector) {
         if (paramVector->n_elem != numP) {
             throw std::invalid_argument("Illegal length of passed vector");
@@ -191,7 +199,7 @@ private:
     // (But unfortunately not at construction time so they can be const).
     bool modelStorageSet;
     arma::Row<T> * model;
-    bool modelGradStorageSet;
+    bool modelGradientStorageSet;
     arma::Row<T> * modelGrad;
 
 protected:
@@ -323,11 +331,14 @@ public:
     virtual const arma::Mat<T> * getInputToTopLossLayer() const = 0;
 
     /*
-     * Used by gradient check.
+     * Used (indirectly) by gradient check only.
      * Model is assumed to be changed in-place across invocations of this method by gradient check.
      * Does not change any of inputs x, true labels outputTrue or model.
+     * Implementing classes that desire to use optionalArgs should override this default
+     * implementation, use optionalArgs and invoke the base class method.
      */
-    std::pair<double, arma::Row<T> *> forwardBackwardsGradModel() {
+    virtual std::pair<double, arma::Row<T> *> forwardBackwardsGradModel(
+            const arma::Row<T> * optionalArgs = nullptr) {
         forward(*(this->x));
         computeLoss();
         backwards();
@@ -335,11 +346,14 @@ public:
     }
 
     /*
-     * Used by gradient check.
+     * Used (indirectly) by gradient check only.
      * Input x is assumed to be changed in-place across invocations of this method by gradient check.
      * Does not change any of inputs x, true labels outputTrue or model.
+     * Implementing classes that desire to use optionalArgs should override this default
+     * implementation, use optionalArgs and invoke the base class method.
      */
-    std::pair<double, arma::Mat<T> *> forwardBackwardsGradInput() {
+    virtual std::pair<double, arma::Mat<T> *> forwardBackwardsGradInput(
+            const arma::Row<T> * optionalArgs = nullptr) {
         forward(*(this->x));
         computeLoss();
         backwards();
@@ -381,10 +395,18 @@ protected:
 };
 
 
+/**
+ * Interface for a scalar function of multiple variables and its derivative.
+ * The independent variables are a Row vector.
+ * A reference to it is provided at object construction or via other function additional to this
+ * interface.
+ * Because the use case in this framework is to hold a model and repeatedly adjust it during
+ * training or gradient check, the class is named so instead of a more general name.
+ */
 template <typename T>
-class LossAndGradientFunctor {
+class ModelGradientFunctor {
 public:
-    virtual ~LossAndGradientFunctor() { };
+    virtual ~ModelGradientFunctor() { };
 
     /*
      * Performs one forward and backwards propagation.
@@ -392,82 +414,92 @@ public:
      */
     virtual std::pair<double, arma::Row<T> *> operator()() = 0;
 
-    LossAndGradientFunctor() { }
+    ModelGradientFunctor() { }
 
-    LossAndGradientFunctor(LossAndGradientFunctor const &) = delete;
-    LossAndGradientFunctor & operator=(LossAndGradientFunctor const &) = delete;
-    LossAndGradientFunctor(LossAndGradientFunctor const &&) = delete;
-    LossAndGradientFunctor & operator=(LossAndGradientFunctor const &&) = delete;
+    ModelGradientFunctor(ModelGradientFunctor const &) = delete;
+    ModelGradientFunctor & operator=(ModelGradientFunctor const &) = delete;
+    ModelGradientFunctor(ModelGradientFunctor const &&) = delete;
+    ModelGradientFunctor & operator=(ModelGradientFunctor const &&) = delete;
+
+    /**
+     * return pointer to encapsulated variable vector.
+     */
+    virtual arma::Row<T> * getModel() = 0;
 };
 
 
+/**
+ * Interface for a scalar function of multiple variables and its derivative.
+ * The independent variables are a two-dimensional matrix.
+ * A reference to it is provided at object construction or via other function additional to this
+ * interface.
+ * The only difference from ModelGradientFunctor is that the independent variable is a matrix
+ * instead of a row vector.
+ * Because the use case in this framework is to hold the inputs to network layer and repeatedly
+ * adjust it during gradient check, the class is named so instead of a more general name.
+ */
 template <typename T>
-class ModelGradientFunctor : public LossAndGradientFunctor<T> {
+class InputGradientFunctor {
 public:
-    virtual ~ModelGradientFunctor() { };
+    virtual ~InputGradientFunctor() { };
 
-    virtual arma::Row<T> * getModel() = 0;
+    virtual std::pair<double, arma::Mat<T> *> operator()() = 0;
 
-    // for testing
-    virtual arma::Row<T> * getModelGradient() = 0;
+    InputGradientFunctor() { }
+
+    InputGradientFunctor(InputGradientFunctor const &) = delete;
+    InputGradientFunctor & operator=(InputGradientFunctor const &) = delete;
+    InputGradientFunctor(InputGradientFunctor const &&) = delete;
+    InputGradientFunctor & operator=(InputGradientFunctor const &&) = delete;
 };
 
 
 template <typename T, typename U>
 class ModelGradientNNFunctor final : public ModelGradientFunctor<T> {
 public:
-    ModelGradientNNFunctor(LossNN<T, U> & lossNN_) : ModelGradientFunctor<T>(), lossNN(lossNN_) {
+    ModelGradientNNFunctor(LossNN<T, U> & lossNN_, const arma::Row<T> * optionalArgs_= nullptr)
+        : ModelGradientFunctor<T>(), lossNN(lossNN_), optionalArgs(optionalArgs_) {
         if (lossNN.getInput() == nullptr) {
-            throw std::runtime_error("ModelGradientNNFunctor: Input not set");
+            throw std::invalid_argument("Input not set");
         }
         if (lossNN.getTrueOutput()  == nullptr) {
-            throw std::runtime_error("ModelGradientNNFunctor: TrueOutput not set");
+            throw std::invalid_argument("TrueOutput not set");
         }
     }
 
     std::pair<double, arma::Row<T> *> operator()() override {
-        return lossNN.forwardBackwardsGradModel();
+        return lossNN.forwardBackwardsGradModel(optionalArgs);
     }
 
     arma::Row<T> * getModel() override {
         return lossNN.getModel();
     }
 
-    arma::Row<T> * getModelGradient() override {
-        return lossNN.getModelGradient();
-    }
-
 private:
     LossNN<T, U> & lossNN;
-};
-
-
-
-template <typename T>
-class InputGradientFunctor {
-public:
-    virtual ~InputGradientFunctor() { };
-    virtual std::pair<double, arma::Mat<T> *> operator()() = 0;
+    const arma::Row<T> * const optionalArgs;
 };
 
 
 template <typename T, typename U>
 class InputGradientNNFunctor final : public InputGradientFunctor<T> {
 public:
-    InputGradientNNFunctor(LossNN<T,U> & lossNN_) : InputGradientFunctor<T>(), lossNN(lossNN_) {
+    InputGradientNNFunctor(LossNN<T,U> & lossNN_, const arma::Row<T> * optionalArgs_= nullptr)
+        : InputGradientFunctor<T>(), lossNN(lossNN_), optionalArgs(optionalArgs_) {
         if (lossNN.getInput() == nullptr) {
-            throw std::runtime_error("InputGradientFunctor: Input not set");
+            throw std::invalid_argument("Input not set");
         }
         if (lossNN.getTrueOutput()  == nullptr) {
-            throw std::runtime_error("InputGradientFunctor: TrueOutput not set");
+            throw std::invalid_argument("TrueOutput not set");
         }
     }
 
     std::pair<double, arma::Mat<T> *> operator()() {
-        return this->lossNN.forwardBackwardsGradInput();
+        return this->lossNN.forwardBackwardsGradInput(optionalArgs);
     }
 private:
     LossNN<T, U> & lossNN;
+    const arma::Row<T> * const optionalArgs;
 };
 
 
@@ -475,7 +507,8 @@ template <typename T>
 void glorotInit(arma::Mat<T> & matrix) {
     double limit = sqrt(6.0 / (matrix.n_rows + matrix.n_cols));
     matrix.randu();
-    matrix *= limit;
+    matrix -= 0.5;
+    matrix *= 2 * limit;
 }
 
 
@@ -527,5 +560,50 @@ public:
     T * const gradientBuffer;
 };
 
+
+/**
+ * Yet another wrapper class for RAII (Resource acquisition is initialization).
+ * Assumes ownership of passed LossNN object in constructor and deletes it in destructor.
+ * Use case is automatic allocation and deallocation of enclosed memory buffers
+ * when this object is allocated on the stack.
+ * TODO: Consider merging LossNNManager and ModelMemoryManager.
+ */
+template <typename T, typename U>
+class LossNNManager final {
+public:
+    /**
+     * @param lossNN_ object will be owned and destructed by this object.
+     */
+    LossNNManager(LossNN<T, U> * lossNN_) : lossNN(lossNN_),
+            modelBuffer(new T[lossNN_->getNumP()]), gradientBuffer(new T[lossNN_->getNumP()]) {
+        arma::Row<T> * modelVec = newRowFixedSizeExternalMemory<T>(modelBuffer, lossNN->getNumP());
+        arma::Row<T> * gradientVec = newRowFixedSizeExternalMemory<T>(gradientBuffer, lossNN->getNumP());
+        lossNN->initParamsStorage(modelVec, gradientVec);
+        delete modelVec;
+        delete gradientVec;
+    }
+
+    ~LossNNManager() {
+        delete lossNN;
+    }
+
+    LossNNManager(LossNNManager const &) = delete;
+    LossNNManager & operator=(LossNNManager const &) = delete;
+    LossNNManager(LossNNManager const &&) = delete;
+    LossNNManager & operator=(LossNNManager const &&) = delete;
+
+    uint32_t getNumP() const {
+        return lossNN->getNumP();
+    }
+
+    LossNN<T, U> * getLossNN() {
+        return lossNN;
+    }
+
+private:
+    LossNN<T, U> * lossNN;
+    T * const modelBuffer;
+    T * const gradientBuffer;
+};
 
 #endif  // _NEURAL_BASE_H_

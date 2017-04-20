@@ -54,10 +54,10 @@ ARMA_FLAGS := -DARMA_DONT_USE_WRAPPER
 CXX1XSTD := -std=c++11
 CXXFLAGS_FINAL := $(CXX1XSTD) $(CXX1XPICFLAGS) $(CXXFLAGS) $(ARMA_FLAGS)
 
-ALL_HEADERS := ceSoftmaxLayer.h dataFeeder.h gradientCheck.h neuralBase.h neuralLayer.h \
-	nnAndData.h neuralClassifier.h sgdSolver.h softmax.h
+ALL_HEADERS := activation.h ceSoftmaxLayer.h dataFeeder.h gradientCheck.h neuralBase.h neuralLayer.h \
+	nnAndData.h neuralClassifier.h rnnLayer.h sgdSolver.h softmax.h
 TEST_OBJS := gradientCheck.o
-TEST_EXECS := sgdSolverTest gradientCheckTest neuralLayerTest neuralClassifierTest softmaxTest
+TEST_EXECS := sgdSolverTest gradientCheckTest neuralLayerTest neuralClassifierTest rnnLayerTest softmaxTest
 
 all: $(TEST_EXECS) spamClassifier
 
@@ -65,6 +65,7 @@ run_tests: $(TEST_EXECS)
 	./gradientCheckTest
 	./neuralLayerTest
 	./neuralClassifierTest
+	./rnnLayerTest
 	./sgdSolverTest
 	./softmaxTest
 
@@ -80,6 +81,9 @@ gradientCheckTest: gradientCheckTest.cpp $(TEST_OBJS)
 
 neuralLayerTest: neuralBase.h neuralLayer.h neuralUtil.h gradientCheck.h activation.h softmax.h
 neuralLayerTest: neuralLayerTest.cpp $(TEST_OBJS)
+	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
+
+rnnLayerTest: rnnLayerTest.cpp $(TEST_OBJS) $(ALL_HEADERS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
 sgdSolverTest: sgdSolver.h neuralBase.h neuralUtil.h nnAndData.h dataFeeder.h

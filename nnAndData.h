@@ -131,7 +131,7 @@ public:
         return lossNN.getModel();
     }
 
-    arma::Row<T> * getModelGradient() override {
+    arma::Row<T> * getModelGradient() {
         return lossNN.getModelGradient();
     }
 

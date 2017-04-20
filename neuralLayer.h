@@ -29,16 +29,22 @@ public:
     }
 
     void modelGlorotInit() {
-        b->zeros();
+        if (!this->isModelStorageSet()) {
+            throw std::logic_error("Attempt to initialize model without model storage been allocated");
+        }
         glorotInit(*w);
+        b->zeros();
     }
 
     void modelNormalInit(double sd = 1.0) {
-        b->zeros();
+        if (!this->isModelStorageSet()) {
+            throw std::logic_error("Attempt to initialize model without model storage been allocated");
+        }
         w->randn();
         if (sd != 1.0) {
             *w *= sd;
         }
+        b->zeros();
     }
 
     arma::Mat<T> * forward(const arma::Mat<T> & input) override {
@@ -48,8 +54,12 @@ public:
         }
         this->x = &input;
 
-        // ((Dy, Dx) x (Dx, N))^T == (N, Dx) x (Dx, Dy) == (N, Dy)
+        // not faster
+        // arma::Mat<T> m = (*w) * input.t();
+        // m.each_col() += (*b);
+        // this->y = f(m.t());
 
+        // ((Dy, Dx) x (Dx, N))^T == (N, Dx) x (Dx, Dy) == (N, Dy)
         this->y = input * (w->t());
         this->y.each_row() += b->t();
         this->y = f(this->y);
@@ -60,7 +70,7 @@ public:
     arma::Mat<T> * backwards(const arma::Mat<T> & deltaUpper) override {
         if (deltaUpper.n_cols != dimY || deltaUpper.n_rows != this->y.n_rows) {
             char fbuf[256];
-            snprintf(fbuf, sizeof(fbuf), "Illegal inputDelta shape: [%u, %u], expected [%u, %u]",
+            snprintf(fbuf, sizeof(fbuf), "Illegal input shape: [%u, %u], expected [%u, %u]",
                     (unsigned)deltaUpper.n_rows, (unsigned)deltaUpper.n_cols,
                     (unsigned)this->y.n_rows, (unsigned)dimY);
             throw std::invalid_argument(fbuf);

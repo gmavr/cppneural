@@ -43,6 +43,7 @@ void gradientCheckHiddenCESoftmax() {
 }
 
 
+template<typename T>
 void runSgd() {
     const int dimX = 20, dimH = 35, dimK = 5;
     const int n = 407;
@@ -54,13 +55,13 @@ void runSgd() {
 
     arma::arma_rng::set_seed(47);
 
-    arma::Mat<double> x(n, dimX);
+    arma::Mat<T> x(n, dimX);
     x.randn();
     arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(n, arma::distr_param(0, dimK - 1));
 
-    DataFeeder<double, int32_t> * dataFeeder = new DataFeeder<double, int32_t>(x, yTrue, nullptr);
+    DataFeeder<T, int32_t> * dataFeeder = new DataFeeder<T, int32_t>(x, yTrue, nullptr);
 
-    SgdSolverBuilder<double> sb;
+    SgdSolverBuilder<T> sb;
     sb.lr = 0.1;
     sb.numEpochs = 50.0;
     sb.minibatchSize = batchSize;
@@ -73,13 +74,12 @@ void runSgd() {
     sb.outMsgStream = &std::cout;
     sb.momentumFactor = 0.95;
 
-    SgdSolver<double> * solver = buildSolver<double>(sb.lr, sb.numEpochs, sb.minibatchSize, n, "adam",
+    SgdSolver<T> * solver = buildSolver<T>(sb.lr, sb.numEpochs, sb.minibatchSize, n, "adam",
             (int)sb.logLevel,
             sb.reportEveryNumEpochs, sb.evaluateEveryNumEpochs, sb.saveEveryNumEpochs, sb.rootDir, sb.momentumFactor,
             sb.outMsgStream);
 
-    ModelHolder<double, int32_t> * modelHolder = new ModelHolder<double, int32_t>(dimX, dimH, dimK, "tanh", nullptr);
-    // std::cout << modelHolder->toString();
+    ModelHolder<T, int32_t> * modelHolder = new ModelHolder<T, int32_t>(dimX, dimH, dimK, "tanh", nullptr);
 
     modelHolder->train(*dataFeeder, *solver);
 
@@ -95,6 +95,6 @@ void runSgd() {
 
 int main(int argc, char** argv) {
     gradientCheckHiddenCESoftmax();
-    runSgd();
+    runSgd<double>();
     std::cout << "Test " << __FILE__ << " passed" << std::endl;
 }

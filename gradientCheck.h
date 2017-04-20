@@ -1,5 +1,5 @@
-#ifndef GRADIENT_CHECK_HPP
-#define GRADIENT_CHECK_HPP
+#ifndef GRADIENT_CHECK_H
+#define GRADIENT_CHECK_H
 
 #include "neuralBase.h"
 
@@ -11,21 +11,21 @@ bool gradientCheck(LG_FUNC & func, MAT & x, double tolerance, bool debugOn);
 // Then we can use a reference variable.
 // Another solution would be to use a #define
 
-typedef bool (*gradientCheckModelDoubleType)(LossAndGradientFunctor<double> &, arma::Row<double> &, double, bool);
+typedef bool (*gradientCheckModelDoubleType)(ModelGradientFunctor<double> &, arma::Row<double> &, double, bool);
 
 typedef bool (*gradientCheckInputDoubleType)(InputGradientFunctor<double> &, arma::Mat<double> &, double, bool);
 
-typedef bool (*gradientCheckModelFloatType)(LossAndGradientFunctor<float> &, arma::Row<float> &, double, bool);
+typedef bool (*gradientCheckModelFloatType)(ModelGradientFunctor<float> &, arma::Row<float> &, double, bool);
 
 typedef bool (*gradientCheckInputFloatType)(InputGradientFunctor<float> &, arma::Mat<float> &, double, bool);
 
 
-gradientCheckModelDoubleType const gradientCheckModelDouble = &gradientCheck<double, LossAndGradientFunctor<double>, arma::Row<double>>;
+gradientCheckModelDoubleType const gradientCheckModelDouble = &gradientCheck<double, ModelGradientFunctor<double>, arma::Row<double>>;
 
 gradientCheckInputDoubleType const gradientCheckInputDouble = &gradientCheck<double, InputGradientFunctor<double>, arma::Mat<double>>;
 
-gradientCheckModelFloatType const gradientCheckModelFloat = &gradientCheck<float, LossAndGradientFunctor<float>, arma::Row<float>>;
+gradientCheckModelFloatType const gradientCheckModelFloat = &gradientCheck<float, ModelGradientFunctor<float>, arma::Row<float>>;
 
 gradientCheckInputFloatType const gradientCheckInputFloat = &gradientCheck<float, InputGradientFunctor<float>, arma::Mat<float>>;
 
-#endif  // GRADIENT_CHECK_HPP
+#endif  // GRADIENT_CHECK_H

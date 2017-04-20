@@ -10,29 +10,44 @@
 
 template <typename T>
 arma::Mat<T> act_tanh(const arma::Mat<T> & in) {
-    return arma::tanh(in);
+    return arma::tanh<arma::Mat<T>>(in);
 }
 
 template <typename T>
 arma::Mat<T> act_tanh_grad(const arma::Mat<T> & tanh_in) {
-    return (1.0 - arma::square(tanh_in));
+    return (1.0 - arma::square<arma::Mat<T>>(tanh_in));
 }
+
 
 template <typename T>
 arma::Mat<T> act_logistic(const arma::Mat<T> & in) {
+    // arma::Mat<T> exps = arma::exp<arma::Mat<T>>(in);
+    // return exps / (exps + 1.0);
+    // on mac and clang -O3: the following 3 lines seem faster than above
     arma::Mat<T> exps = arma::exp<arma::Mat<T>>(in);
-    arma::Mat<T> d = arma::ones(in.n_rows, in.n_cols);
+    arma::Mat<T> d = arma::ones<arma::Mat<T>>(in.n_rows, in.n_cols);
     d += exps;
     return exps / d;
 }
 
 template <typename T>
-arma::Mat<T> act_logistic_grad(const arma::Mat<T> & sigmoid_in) {
-    arma::Mat<T> d = arma::ones(sigmoid_in.n_rows, sigmoid_in.n_cols);
-    d -= sigmoid_in;
-    d %= sigmoid_in;  // in-place element-wise multiplication
+arma::Mat<T> act_logistic_grad(const arma::Mat<T> & in) {
+    // return (1.0 - in) % in;
+    // on mac and clang -O3: the following 3 lines seem faster than above
+    arma::Mat<T> d = arma::ones<arma::Mat<T>>(in.n_rows, in.n_cols);
+    d -= in;
+    d %= in;  // in-place element-wise multiplication
     return d;
 }
+
+template <typename T>
+void act_logistic_grad_in_place(const arma::Mat<T> & in, arma::Mat<T> & out) {
+    out = (1.0 - in) % in;
+    // above executes at same speed as following:
+    // out = in;
+    // out.transform( [](T val) { return (1.0 - val) * val; } );
+}
+
 
 template <typename T>
 arma::Mat<T> act_relu(const arma::Mat<T> & in) {
@@ -41,7 +56,7 @@ arma::Mat<T> act_relu(const arma::Mat<T> & in) {
 
 template <typename T>
 arma::Mat<T> act_relu_grad(const arma::Mat<T> & relu_in) {
-    arma::Mat<T> d = arma::zeros(relu_in.n_rows, relu_in.n_cols);
+    arma::Mat<T> d = arma::zeros<arma::Mat<T>>(relu_in.n_rows, relu_in.n_cols);
     d.elem(arma::find(relu_in > 0.0)).ones();
     return d;
 }

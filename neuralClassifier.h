@@ -206,7 +206,9 @@ public:
           modelVec(newRowFixedSizeExternalMemory<T>(mm.modelBuffer, lossNN.getNumP())),
           gradientVec(newRowFixedSizeExternalMemory<T>(mm.gradientBuffer, lossNN.getNumP())),
           outMsgStream(outMsgStream_) {
-
+        // TODO: We do not need to keep modelVec and gradientVec alive outside the constructor.
+        // We only need them for holding the length, lossNN.initParamsStorage() creates references
+        // to the storage they point to but they do not own anyway
         lossNN.initParamsStorage(modelVec, gradientVec);
         lossNN.modelGlorotInit();
         if (outMsgStream != nullptr) {
@@ -259,6 +261,9 @@ public:
         }
     }
 
+    /*
+     * Forward-propagates full data set once and returns mean loss.
+     */
     double forwardOnlyFullEpoch(DataFeeder<T, U> & dataFeeder, unsigned int batchSize=1024) {
         if (!dataFeeder.isAtEpochStart()) {
             throw std::invalid_argument("DataFeeder object not at the start of the data set.");

@@ -135,17 +135,17 @@ void testGradientforActivation(const std::string & activation) {
 
     lossNN.initParamsStorage(&modelVec, &gradientVec);
 
-    modelVec.randu();
+    modelVec.randn();
 
     arma::Mat<double> x(n, dimx);
     arma::Mat<double> yTrue(n, dimy);
-    x.randu();
-    yTrue.randu();
+    x.randn();
+    yTrue.randn();
 
     lossNN.forward(x);
     lossNN.setTrueOutput(yTrue);
 
-    const double tolerance = 1e-9;
+    const double tolerance = 5e-9;
 
     bool gcPassed;
     ModelGradientNNFunctor<double, double> mgf(lossNN);

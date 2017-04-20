@@ -12,16 +12,16 @@ bool testProjectionSumLoss() {
     const double tolerance = 1e-9;
 
     arma::Mat<double> x = arma::Mat<double>(n, dimX);
-    x.randu();
+    x.randn();
     arma::Mat<double> yTrue = arma::Mat<double>(n, 1);
-    yTrue.randu();
+    yTrue.randn();
 
     ModelMemoryManager<double> mm(numP);
     double * modelBuffer = mm.modelBuffer;
     double * gradientBuffer = mm.gradientBuffer;
 
     arma::Row<double> modelVec = arma::Row<double>(modelBuffer, numP, false, true);
-    modelVec.randu();
+    modelVec.randn();
     arma::Row<double> gradientVec = arma::Row<double>(gradientBuffer, numP, false, true);
 
     ProjectionSumLoss<double> lossNN(dimX);
@@ -55,16 +55,16 @@ bool testNeuralL2Loss() {
     const double tolerance = 1e-8;
 
     arma::Mat<double> x = arma::Mat<double>(n, dimX);
-    x.randu();
+    x.randn();
     arma::Mat<double> yTrue = arma::Mat<double>(n, dimY);
-    yTrue.randu();
+    yTrue.randn();
 
     ModelMemoryManager<double> mm(numP);
     double * modelBuffer = mm.modelBuffer;
     double * gradientBuffer = mm.gradientBuffer;
 
     arma::Row<double> modelVec = arma::Row<double>(modelBuffer, numP, false, true);
-    modelVec.randu();
+    modelVec.randn();
     arma::Row<double> gradientVec = arma::Row<double>(gradientBuffer, numP, false, true);
 
     NeuralLayer<double> nl(dimX, dimY, "logistic");

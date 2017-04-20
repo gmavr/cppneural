@@ -1,15 +1,23 @@
-#include "gradientCheck.h"
+#include <armadillo>
 
 #include <algorithm>
-#include <cstdlib>
+#include <cmath>
+#include <cstdio>
+#include <utility>
+
+#include "gradientCheck.h"
 
 
 template <typename T, typename LG_FUNC, typename MAT>
 bool gradientCheck(LG_FUNC & func, MAT & x, double tolerance, bool debugOn) {
 
+    auto startTime = std::chrono::steady_clock::now();
+
     std::pair<double, MAT *> ret = func();
     const double fx = ret.first;
     const MAT gradient(*(ret.second));
+
+    printf("Starting gradient check. Number parameters: %u\n", (unsigned)gradient.n_elem);
 
     if (debugOn) {
         printf("loss=%f\n", fx);
@@ -70,6 +78,13 @@ bool gradientCheck(LG_FUNC & func, MAT & x, double tolerance, bool debugOn) {
         i++;
     }
 
+    auto diff = std::chrono::steady_clock::now() - startTime;
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
+
+    printf("Per invocation time: %.4g sec. Total time elapsed for %u invocations: %.4g sec\n",
+            1e-9 * elapsed / (double)(1 + 2 * gradient.n_elem),
+            (unsigned)(1 + 2 * gradient.n_elem), 1e-9 * elapsed);
+
     return true;
 }
 
@@ -77,8 +92,8 @@ bool gradientCheck(LG_FUNC & func, MAT & x, double tolerance, bool debugOn) {
 // template code instantiation
 
 template
-bool gradientCheck<double, LossAndGradientFunctor<double>, arma::Row<double>>
-(LossAndGradientFunctor<double> & func, arma::Row<double> & x, double tolerance, bool debugOn);
+bool gradientCheck<double, ModelGradientFunctor<double>, arma::Row<double>>
+(ModelGradientFunctor<double> & func, arma::Row<double> & x, double tolerance, bool debugOn);
 
 template
 bool gradientCheck<double, InputGradientFunctor<double>, arma::Mat<double>>
@@ -86,8 +101,8 @@ bool gradientCheck<double, InputGradientFunctor<double>, arma::Mat<double>>
 
 
 template
-bool gradientCheck<float, LossAndGradientFunctor<float>, arma::Row<float>>
-(LossAndGradientFunctor<float> & func, arma::Row<float> & x, double tolerance, bool debugOn);
+bool gradientCheck<float, ModelGradientFunctor<float>, arma::Row<float>>
+(ModelGradientFunctor<float> & func, arma::Row<float> & x, double tolerance, bool debugOn);
 
 template
 bool gradientCheck<float, InputGradientFunctor<float>, arma::Mat<float>>

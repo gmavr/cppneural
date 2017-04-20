@@ -1,24 +1,26 @@
 #ifndef _SGD_SOLVER_H_
 #define _SGD_SOLVER_H_
 
-#include <armadillo>
-
-#include "neuralBase.h"
-#include "nnAndData.h"
-
+#include <stdint.h>
 #include <sys/stat.h>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
-#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include <armadillo>
+
+#include "neuralBase.h"
+#include "nnAndData.h"
+
 
 /*
  * Stochastic Gradient Descend and variants.
@@ -80,15 +82,7 @@ public:
     SgdSolver & operator=(SgdSolver const &&) = delete;
 
     /**
-     * Use this method only for functor objects that do not contain inside them a reference
-     * to the model object.
-     */
-    void sgdWithExternalModel(LossAndGradientFunctor<T> & functor_, arma::Row<T> & x_);
-
-    /**
      * For SGD and testing layer gradient w.r.to part of the model held in that layer.
-     * Use this method for functor objects that contain inside them a reference
-     * to the model object.
      */
     void sgd(ModelGradientFunctor<T> & functor_);
 
@@ -99,7 +93,7 @@ public:
     void sgd(ModelGradientFunctor<T> & trainFunctor, ModelFunctor<T> & devFunctor);
 
     /**
-     * It is assumed that each time LossAndGradientFunctor::operator()() is
+     * It is assumed that each time ModelGradientFunctor::operator()() is
      * invoked, it processes getMinibatchSize() samples (with the exception of
      * the last batch in an epoch). If not, then the counter information reported
      * by this object would be wrong.
@@ -143,7 +137,7 @@ protected:
         return lr;
     }
 
-    inline LossAndGradientFunctor<T> & getFunctorRef() {
+    inline ModelGradientFunctor<T> & getFunctorRef() {
         return *(this->functor);
     }
 
@@ -172,7 +166,7 @@ private:
     // Owned by this object via this->updateX
     T * gradientBuffer;
 
-    LossAndGradientFunctor<T> * functor;
+    ModelGradientFunctor<T> * functor;
     ModelFunctor<T> * devFunctor;
 
     const double lr;
@@ -203,11 +197,13 @@ private:
     std::vector<ConvergenceData> convergence;
     std::vector<ValidationData> validation;
 
+    // all following are 1-based
     uint32_t nextReportIter, numReported;
     uint32_t nextEvalIter, numEvaluated;
     uint32_t nextSaveIter, numSaved;
 
-    double timeExcluded;
+    std::chrono::time_point<std::chrono::steady_clock> timeMark;
+    double totalTrainingElapsed;
 };
 
 
@@ -225,7 +221,7 @@ SgdSolver<T>::SgdSolver(double lr_, uint32_t minibatchSize_,
           evaluateEvery(evaluateEvery_), saveEvery(saveEvery_), saveRootDir(saveRootDir_),
           convergence(), validation(),
           nextReportIter(0), numReported(0), nextEvalIter(0), numEvaluated(0),
-          nextSaveIter(0), numSaved(0), timeExcluded(0.0) {
+          nextSaveIter(0), numSaved(0), timeMark(), totalTrainingElapsed(0.0) { // timeExcluded(0.0) {
 }
 
 
@@ -252,24 +248,6 @@ SgdSolver<T>::toString() const {
 
 
 /**
- * Use this method only for functor objects that do not contain inside them a reference
- * to the model object.
- */
-template <typename T>
-void SgdSolver<T>::sgdWithExternalModel(LossAndGradientFunctor<T> & functor_, arma::Row<T> & x_) {
-    if (initialized) {
-        throw std::runtime_error("SgdSolver is single use only");
-    }
-    initialized = true;
-
-    functor = &functor_;
-    x = &x_;
-
-    sgdRun();
-}
-
-
-/**
  * For SGD and testing layer gradient w.r.to part of the model held in that layer.
  * Use this method for functor objects that contain inside them a reference
  * to the model object.
@@ -281,7 +259,7 @@ void SgdSolver<T>::sgd(ModelGradientFunctor<T> & functor_) {
     }
 
     if (initialized) {
-        throw std::runtime_error("SgdSolver is single use only");
+        throw std::logic_error("SgdSolver is single use only");
     }
     initialized = true;
 
@@ -322,7 +300,7 @@ void SgdSolver<T>::sgdRun() {
     if (reportEvery > 0.0) {
         nextReportIter = uint32_t(reportEvery * (numReported + 1));
         if (logLevel >= SgdSolverLogLevel::info) {
-            logToOutMsgStream("Next report iteration index: %d, period: %.1f", nextReportIter + 1, reportEvery);
+            logToOutMsgStream("Next report iteration index: %d, period: %.1f", nextReportIter, reportEvery);
         }
     } else {
         nextReportIter = 0;
@@ -334,7 +312,7 @@ void SgdSolver<T>::sgdRun() {
         }
         nextEvalIter = uint32_t(evaluateEvery * (numEvaluated + 1));
         if (logLevel >= SgdSolverLogLevel::info) {
-            logToOutMsgStream("Next evaluation iteration index: %d, period: %.1f", nextEvalIter + 1, evaluateEvery);
+            logToOutMsgStream("Next evaluation iteration index: %d, period: %.1f", nextEvalIter, evaluateEvery);
         }
     } else {
         nextEvalIter = 0;
@@ -343,7 +321,7 @@ void SgdSolver<T>::sgdRun() {
     if (saveEvery > 0.0) {
         nextSaveIter = uint32_t(saveEvery * (numSaved + 1));
         if (logLevel >= SgdSolverLogLevel::info) {
-            logToOutMsgStream("Next save iteration index: %d, period: %.1f", nextSaveIter + 1, reportEvery);
+            logToOutMsgStream("Next save iteration index: %d, period: %.1f", nextSaveIter, reportEvery);
         }
     } else {
         nextSaveIter = 0;
@@ -355,6 +333,15 @@ void SgdSolver<T>::sgdRun() {
     // updateX uses foreign memory without copying it and does not allow resize
     updateX = newRowFixedSizeExternalMemory(gradientBuffer, x->n_cols);
 
+    if (logLevel >= SgdSolverLogLevel::info) {
+        auto now = std::chrono::system_clock::now();
+        std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+        char tbuf[128];
+        std::strftime(tbuf, sizeof(tbuf), "%F %T", std::localtime(&now_c));
+        logToOutMsgStream("Starting SGD. Number iterations per epoch %.1f. Time: %s",
+                numIterationsPerEpoch, tbuf);
+    }
+
     derivedInit();
 
     sgdLoop();
@@ -363,7 +350,7 @@ void SgdSolver<T>::sgdRun() {
 
 template <typename T>
 inline void SgdSolver<T>::sgdLoop() {
-    auto startTime = std::chrono::steady_clock::now();
+    timeMark = std::chrono::steady_clock::now();
 
     for (uint32_t iterationIndex = startIterationIndex + 1;
             iterationIndex <= lastIterationIndex;
@@ -399,42 +386,64 @@ inline void SgdSolver<T>::sgdLoop() {
         *x -= * updateX;
     }
 
-    auto diff = std::chrono::steady_clock::now() - startTime;
+    auto diff = std::chrono::steady_clock::now() - timeMark;
     double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
-    elapsed -= timeExcluded;
+    totalTrainingElapsed += elapsed;
 
     if (logLevel >= SgdSolverLogLevel::info) {
-        logToOutMsgStream("Finished SGD. Processing rate: %.4g sec per batch of size %d",
-                1e-9 * elapsed / (double)lastIterationIndex, minibatchSize);
+        auto now = std::chrono::system_clock::now();
+        std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+        char tbuf[128];
+        std::strftime(tbuf, sizeof(tbuf), "%F %T", std::localtime(&now_c));
+        logToOutMsgStream("Finished SGD. Time: %s", tbuf);
+        logToOutMsgStream("Processing rate: %.4g sec per batch of size %u",
+                1e-9 * totalTrainingElapsed / (double)lastIterationIndex, minibatchSize);
     }
 }
 
 
 template <typename T>
 void SgdSolver<T>::reportMetrics(uint32_t iterationIndex) {
+    auto diff = std::chrono::steady_clock::now() - timeMark;
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
 
-    T paramScale = arma::norm(*x, 2);
-    T updateScale = arma::norm(*updateX, 2);
+    // returned norms are non-sensical when T=float, but good when T=double
+    // loss is almost the same regardless of T=float or T=double, as expected.
+    // what is going on?
+    double paramScale = arma::norm<arma::Row<T>>(*x, 2);
+    double updateScale = arma::norm<arma::Row<T>>(*updateX, 2);
 
-    double updateNormRatio = paramScale == 0.0 ? NAN : updateScale / paramScale;
+    double updateNormRatio = paramScale == 0.0 ? NAN : updateScale /paramScale;
 
     if (logLevel >= SgdSolverLogLevel::info) {
+        if (totalTrainingElapsed == 0.0) {
+            // first time reporting
+            double perBatchTimeElapsed = elapsed / (double) (nextReportIter - 0);
+            logToOutMsgStream("per batch time: %.4g sec, estimated per epoch time: %.3f hr",
+                    1e-9 * perBatchTimeElapsed, 1e-9 *(perBatchTimeElapsed * numIterationsPerEpoch) / 3600.0);
+        }
         logToOutMsgStream(
                 "iteration %d: epoch %.2f: smoothened loss: %f last loss: %f update ratio: %g",
                 iterationIndex, (float(iterationIndex) / numIterationsPerEpoch), smoothLoss,
                 loss, updateNormRatio);
     }
 
+    totalTrainingElapsed += elapsed;
+
     convergence.push_back(ConvergenceData(iterationIndex, smoothLoss, updateNormRatio));
 
     numReported++;
     nextReportIter = uint32_t(reportEvery * (numReported + 1));
+
+    timeMark = std::chrono::steady_clock::now();
 }
 
 
 template <typename T>
 void SgdSolver<T>::evaluateOnValidationSet(uint32_t iterationIndex) {
-    auto devStartTime = std::chrono::steady_clock::now();
+    auto diff = std::chrono::steady_clock::now() - timeMark;
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
+    totalTrainingElapsed += elapsed;
 
     double devLoss = devFunctor->evaluate();
     validation.push_back(ValidationData(iterationIndex, devLoss));
@@ -446,8 +455,7 @@ void SgdSolver<T>::evaluateOnValidationSet(uint32_t iterationIndex) {
                 iterationIndex, (float(iterationIndex) / numIterationsPerEpoch), devLoss);
     }
 
-    auto devDiff = std::chrono::steady_clock::now() - devStartTime;
-    timeExcluded += std::chrono::duration_cast<std::chrono::nanoseconds>(devDiff).count();
+    timeMark = std::chrono::steady_clock::now();
 }
 
 
@@ -460,6 +468,10 @@ void SgdSolver<T>::saveModel(uint32_t iterationIndex) {
     // the current state of that random number generator. See also:
     // http://stackoverflow.com/questions/21058775/can-i-get-the-current-seed-from-a-mersenne-twister
 
+    auto diff = std::chrono::steady_clock::now() - timeMark;
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
+    totalTrainingElapsed += elapsed;
+
     char fbuf[1024];
     snprintf(fbuf, sizeof(fbuf), "%s/model_%d.arma_bin", saveRootDir.c_str(), iterationIndex);
 
@@ -470,6 +482,8 @@ void SgdSolver<T>::saveModel(uint32_t iterationIndex) {
 
     numSaved++;
     nextSaveIter = uint32_t(saveEvery * (numSaved + 1));
+
+    timeMark = std::chrono::steady_clock::now();
 }
 
 
@@ -525,7 +539,7 @@ SgdSolverStandard<T>::toString() const {
 template <typename T>
 inline void
 SgdSolverStandard<T>::computeUpdateAndLoss() {
-    LossAndGradientFunctor<T> & functorRef = this->getFunctorRef();
+    ModelGradientFunctor<T> & functorRef = this->getFunctorRef();
     std::pair<double, arma::Row<T> *> ret = functorRef();
     this->loss = ret.first;
     // check how many memory copies. Ideally the move assign op should be called
@@ -575,7 +589,7 @@ SgdSolverMomentum<T>::toString() const {
 template <typename T>
 inline void
 SgdSolverMomentum<T>::computeUpdateAndLoss() {
-    LossAndGradientFunctor<T> & functorRef = this->getFunctorRef();
+    ModelGradientFunctor<T> & functorRef = this->getFunctorRef();
     std::pair<double, arma::Row<T> *> ret = functorRef();
     this->loss = ret.first;
     // according to arma doc, there should no temporaries involved here
@@ -658,7 +672,7 @@ void SgdSolverAdam<T>::derivedInit() {
 
 template <typename T>
 void SgdSolverAdam<T>::computeUpdateAndLoss() {
-    LossAndGradientFunctor<T> & functorRef = this->getFunctorRef();
+    ModelGradientFunctor<T> & functorRef = this->getFunctorRef();
     std::pair<double, arma::Row<T> *> ret = functorRef();
     this->loss = ret.first;
 
