@@ -1,5 +1,5 @@
-#ifndef NEURAL_LAYER_HPP
-#define NEURAL_LAYER_HPP
+#ifndef NEURAL_LAYER_H
+#define NEURAL_LAYER_H
 
 #include <iostream>
 #include <stdexcept>
@@ -29,17 +29,13 @@ public:
     }
 
     void modelGlorotInit() {
-        if (!this->isModelStorageSet()) {
-            throw std::logic_error("Attempt to initialize model without model storage been allocated");
-        }
+        this->throwIfNotModelStorage();
         glorotInit(*w);
         b->zeros();
     }
 
     void modelNormalInit(double sd = 1.0) {
-        if (!this->isModelStorageSet()) {
-            throw std::logic_error("Attempt to initialize model without model storage been allocated");
-        }
+        this->throwIfNotModelStorage();
         w->randn();
         if (sd != 1.0) {
             *w *= sd;
@@ -76,8 +72,7 @@ public:
             throw std::invalid_argument(fbuf);
         }
 
-        const arma::Mat<T> grad_act = gradf(this->y);
-        const arma::Mat<T> deltaErr = grad_act % deltaUpper;  // element-wise product
+        const arma::Mat<T> deltaErr = gradf(this->y) % deltaUpper;  // element-wise product
 
         // (Dy, N) x (N, Dx) is the sum of outer products (Dy, 1) x (1, Dx) over the N samples
         *dw = deltaErr.t() * (*(this->x));
@@ -142,4 +137,4 @@ private:
     const std::string activationName;  // for reporting only
 };
 
-#endif  // NEURAL_LAYER_HPP
+#endif  // NEURAL_LAYER_H

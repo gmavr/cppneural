@@ -1,6 +1,6 @@
 ## Introduction
 
-An efficient C++11 implementation and framework for training neural networks. It has been explicitly designed with class hierarchy and generic code allowing for modular implementation and wiring of various types of neural network layers. It currently provides a standard feed-forward hidden layer, multi-class logistic (softmax) regression output layer for classification and squared-error loss output layer for regression as elementary proof functionality. It includes implementation for three variants of stochastic gradient descend, with additional features such as periodic reporting of training loss and periodic evaluation on a held-out data set. It uses the [Armadillo C++ linear algebra library](http://arma.sourceforge.net) for efficient matrix operations.
+An efficient C++11 implementation and framework for training neural networks. It has been explicitly designed with class hierarchy and generic code allowing for modular implementation and wiring of various types of neural network layers. It currently provides a standard feed-forward hidden layer, standard recurrent layer (RNN), multi-class logistic (softmax) regression output layer for classification and squared-error loss output layer for regression as elementary proof functionality. It includes implementation for three variants of stochastic gradient descend, with additional features such as periodic reporting of training loss and periodic evaluation on a held-out data set. It uses the [Armadillo C++ linear algebra library](http://arma.sourceforge.net) for efficient matrix operations.
 
 This project was started as an experimental migration from python and numpy to C++ of a much more extensive neural network framework I wrote from scratch. (The python framework implements reccurrent layers including GRUs, embedding layers, extensions to batches of parallel sequencies, conditional random fields and has been used in a deep learning project). As such, it is almost certain that from an architecture point of view this C++ framework can extend to more complicated networks, but the additional effort to do it is obviously required.
 
@@ -17,13 +17,14 @@ This project was started as an experimental migration from python and numpy to C
 * Optionally, configurable periodic evaluation on disjoint validation set and reporting of validation loss, printable in real-time and programmatically available at the end of fitting procedure.
 * Configurable periodic of storing models implemented, but unfortunately loading them not yet.
 * Single hidden layer with configurable tanh, sigmoid or relu activation functions.
+* Recurrent Network layer with configurable activation function.
 * Softmax classification layer with numerically stable softmax implementation.
 * All network size parameters are configurable.
 * Randomized Xavier Glorot initialization of model matrices.
 
 ## Build Instructions and Testing
 
-Build has been verified on ubuntu 16.04 and Mac OS X Sierra systems only with the default gcc and Xcode-provided clang C++11 compilers respectively. [GNU Make](https://www.gnu.org/software/make/) is used to build the code and execute the tests. The only dependencies not likely to be present is the Armadillo C++ library, which in Linux also recommends BLAS and LAPACK implementations. Follow inline instructions in `Makefile` for installing dependencies and tweeking build. Invoke the tests by `make run_tests`. All existing components have gradient checks for correctness of the derivatives and are invoked as part of the tests.
+Build has been verified on ubuntu 16.04 and Mac OS X Sierra systems only with the default gcc and Xcode-provided clang C++11 compilers respectively. [GNU Make](https://www.gnu.org/software/make/) is used to build the code and execute the tests. The only dependencies not likely to be present is the Armadillo C++ library, which in Linux also recommends BLAS and LAPACK implementations. Follow inline instructions in `Makefile` for installing dependencies and tweaking build. Invoke the tests by `make run_tests`. All existing components have gradient checks for correctness of the derivatives and are invoked as part of the tests.
 
 ## Design
 

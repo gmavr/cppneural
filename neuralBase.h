@@ -131,9 +131,7 @@ public:
      * Returned pointed object owned by this object, caller may not delete it.
      */
     inline arma::Row<T> * getModel() {
-        if (!modelStorageSet) {
-            throw std::logic_error("Attempt to getModel() when storage not set");
-        }
+        throwIfNotModelStorage();
         return model;
     }
 
@@ -166,6 +164,13 @@ public:
 
     inline bool isModelGradientStorageSet() const {
         return modelGradientStorageSet;
+    }
+
+protected:
+    void throwIfNotModelStorage() {
+        if (!isModelStorageSet()) {
+            throw std::logic_error("Attempt to access model storage when not yet allocated");
+        }
     }
 
 private:
