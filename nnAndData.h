@@ -1,10 +1,9 @@
 #ifndef _NNANDDATA_H_
 #define _NNANDDATA_H_
 
-#include <armadillo>
 #include <chrono>
 #include <cmath>
-#include <stdint.h>
+#include <cstdint>
 #include <cstdio>
 #include <iostream>
 #include <utility>

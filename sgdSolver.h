@@ -1,12 +1,12 @@
 #ifndef _SGD_SOLVER_H_
 #define _SGD_SOLVER_H_
 
-#include <stdint.h>
 #include <sys/stat.h>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -15,8 +15,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <armadillo>
 
 #include "neuralBase.h"
 #include "nnAndData.h"

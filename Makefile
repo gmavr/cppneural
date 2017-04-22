@@ -54,8 +54,9 @@ ARMA_FLAGS := -DARMA_DONT_USE_WRAPPER
 CXX1XSTD := -std=c++11
 CXXFLAGS_FINAL := $(CXX1XSTD) $(CXX1XPICFLAGS) $(CXXFLAGS) $(ARMA_FLAGS)
 
-ALL_HEADERS := activation.h ceSoftmaxLayer.h dataFeeder.h gradientCheck.h neuralBase.h neuralLayer.h \
-	nnAndData.h neuralClassifier.h rnnLayer.h sgdSolver.h softmax.h
+CORE_SRC_HEADERS := activation.h ceSoftmaxLayer.h dataFeeder.h neuralBase.h neuralLayer.h \
+	nnAndData.h sgdSolver.h softmax.h
+TEST_HEADERS := gradientCheck.h util.h
 TEST_OBJS := gradientCheck.o
 TEST_EXECS := sgdSolverTest gradientCheckTest neuralLayerTest neuralClassifierTest rnnLayerTest softmaxTest
 
@@ -72,33 +73,33 @@ run_tests: $(TEST_EXECS)
 gradientCheck.o: gradientCheck.cpp gradientCheck.h neuralBase.h
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -c -o $@ $<
 
-neuralClassifierTest: neuralClassifierTest.cpp $(TEST_OBJS) $(ALL_HEADERS)
+neuralClassifierTest: neuralClassifierTest.cpp neuralClassifier.h $(TEST_OBJS) $(CORE_SRC_HEADERS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
-gradientCheckTest: neuralBase.h neuralLayer.h gradientCheck.h neuralUtil.h activation.h
+gradientCheckTest: neuralBase.h neuralLayer.h layers.h activation.h $(TEST_HEADERS)
 gradientCheckTest: gradientCheckTest.cpp $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
-neuralLayerTest: neuralBase.h neuralLayer.h neuralUtil.h gradientCheck.h activation.h softmax.h
+neuralLayerTest: neuralBase.h neuralLayer.h layers.h activation.h $(TEST_HEADERS)
 neuralLayerTest: neuralLayerTest.cpp $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
-rnnLayerTest: rnnLayerTest.cpp $(TEST_OBJS) $(ALL_HEADERS)
+rnnLayerTest: rnnLayerTest.cpp rnnLayer.h $(TEST_OBJS) $(CORE_SRC_HEADERS) $(TEST_HEADERS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
-sgdSolverTest: sgdSolver.h neuralBase.h neuralUtil.h nnAndData.h dataFeeder.h
+sgdSolverTest: sgdSolver.h neuralBase.h layers.h nnAndData.h dataFeeder.h
 sgdSolverTest: sgdSolverTest.cpp
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(LIBS)
 
-softmaxTest: softmax.h ceSoftmaxLayer.h gradientCheck.h
+softmaxTest: neuralBase.h softmax.h ceSoftmaxLayer.h $(TEST_HEADERS)
 softmaxTest: softmaxTest.cpp $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
-spamClassifier: spamClassifier.cpp $(ALL_HEADERS)
+spamClassifier: spamClassifier.cpp neuralClassifier.h $(CORE_SRC_HEADERS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(LIBS)
 
 # lib_shared: $(SHARED_LIB)
-# $(SHARED_LIB): $(OBJS) $(ALL_HEADERS)
+# $(SHARED_LIB): $(OBJS) $(CORE_SRC_HEADERS)
 # 	$(CXX) $(CXX1XSTD) -shared $(LDFLAGS) -L/usr/local/lib -o $(SHARED_LIB) $(OBJS)
 
 .PHONY: clean

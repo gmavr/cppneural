@@ -1,13 +1,9 @@
 #include "softmax.h"
 #include "ceSoftmaxLayer.h"
 #include "gradientCheck.h"
+#include "util.h"
 
 #include <cassert>
-
-template<typename T>
-bool areAllClose(const arma::Mat<T> & x1, const arma::Mat<T> & x2, double tolerance) {
-    return arma::all(arma::vectorise(arma::abs(x1 - x2) <= arma::abs(tolerance * x2)));
-}
 
 
 void testSoftmaxFunction() {
@@ -52,7 +48,7 @@ void testCESoftmaxLayer() {
     const int dimX = 3, dimK = 2;
     const int numP = dimK * dimX + dimK;
 
-    CESoftmaxNN<double, uint32_t> lossNN(dimK, dimX);
+    CESoftmaxNN<double, uint32_t> lossNN(dimX, dimK);
 
     ModelMemoryManager<double> mm(numP);
     double * modelBuffer = mm.modelBuffer;
@@ -96,7 +92,7 @@ void gradientCheckHiddenCESoftmax() {
     const int dimX = 20, dimK = 10;
     const int numP = dimK * dimX + dimK;
 
-    CESoftmaxNN<double, uint32_t> lossNN(dimK, dimX);
+    CESoftmaxNN<double, uint32_t> lossNN(dimX, dimK);
 
     const int n = 20;
 

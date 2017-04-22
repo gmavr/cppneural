@@ -1,18 +1,19 @@
-#include <stdint.h>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <vector>
 
 #include <armadillo>
 
-#include "rnnLayer.h"
 #include "ceSoftmaxLayer.h"
 #include "dataFeeder.h"
 #include "gradientCheck.h"
-#include "neuralUtil.h"
+#include "layers.h"
 #include "nnAndData.h"
+#include "rnnLayer.h"
 #include "sgdSolver.h"
+#include "util.h"
 
 
 void testLayer() {
@@ -68,7 +69,7 @@ void testLayer() {
     // verify last hidden state propagation and reset
 
     // when we reset hidden state, same results if we pass data again
-    rnn.resetHiddenState();
+    rnn.resetInitialHiddenState();
     y = rnn.forward(x);
     assert(areAllClose(*y, yExpected, 1e-8));
     delta = rnn.backwards(deltaUpper);
@@ -80,155 +81,29 @@ void testLayer() {
 }
 
 
-template <typename T, typename U>
-class RnnSoftMax final : public LossNN<T, U> {
-
-public:
-    /**
-     * @param dimX_ input dimensionality to hidden layer
-     * @param dimH_ hidden state dimensionality (number of units)
-     * @param dimK_ number classes
-     * @param maxSeqLength maximum sequence length for RNN
-     * @param activation type of transfer function of hidden layer @see activation.h
-     */
-    RnnSoftMax(uint32_t dimX_, uint32_t dimH_, uint32_t dimK_, uint32_t maxSeqLength,
-            const std::string & activation)
-        : LossNN<T, U>(RnnLayer<T>::getStaticNumP(dimX_, dimH_)
-                + CESoftmaxNN<T, U>::getStaticNumP(dimK_, dimH_)),
-        rnn(dimX_, dimH_, maxSeqLength, activation), cesf(dimK_, dimH_),
-        rnnModel(nullptr), cesfModel(nullptr),
-        rnnGradient(nullptr), cesfGradient(nullptr) {
-        if (this->getNumP() != rnn.getNumP() + cesf.getNumP()) {
-            throw std::runtime_error("Implementation bug: Sizes do not match");
-        }
-    }
-
-    virtual ~RnnSoftMax() {
-        delete rnnModel;
-        delete cesfModel;
-        delete rnnGradient;
-        delete cesfGradient;
-    }
-
-    void modelGlorotInit() {
-        cesf.modelGlorotInit();
-        rnn.modelGlorotInit();
-    }
-
-    std::string toString() const {
-        std::stringstream ss;
-        ss << "RnnSoftMax: dimX=" << rnn.getDimX() << ", dimH=" << rnn.getDimY() << ", dimK="
-           << cesf.getDimK() << ", activation=" << rnn.getActivationName() << ", numP="
-           << this->getNumP() << std::endl;
-        return ss.str();
-    }
-
-    inline arma::Mat<T> * forward(const arma::Mat<T> & input) override {
-        this->x = &input;
-        arma::Mat<T> * hs = rnn.forward(input);
-        return cesf.forward(*hs);
-    }
-
-    const arma::Mat<T> * getInputToTopLossLayer() const override {
-        return cesf.getInputToTopLossLayer();
-    }
-
-    inline arma::Mat<T> * backwards() override {
-        arma::Mat<T> * deltaErr = cesf.backwards();
-        *(this->inputGrad) = *(rnn.backwards(*deltaErr));  // memory copy
-        return this->inputGrad;
-    }
-
-    virtual std::pair<double, arma::Row<T> *> forwardBackwardsGradModel(const arma::Row<T> * optionalArgs) override {
-        rnn.setInitialHiddenState(*optionalArgs);
-        return LossNN<T, U>::forwardBackwardsGradModel();
-    }
-
-    virtual std::pair<double, arma::Mat<T> *> forwardBackwardsGradInput(const arma::Row<T> * optionalArgs) override {
-        rnn.setInitialHiddenState(*optionalArgs);
-        return LossNN<T, U>::forwardBackwardsGradInput();
-    }
-
-    virtual void setTrueOutput(const arma::Mat<U> & outputTrue) override {
-        cesf.setTrueOutput(outputTrue);
-    }
-
-    virtual double getLoss() const override {
-        return cesf.getLoss();
-    }
-
-    virtual const arma::Mat<U> * getTrueOutput() const override {
-        return cesf.getTrueOutput();
-    }
-
-    virtual uint32_t getDimX() const override {
-        return rnn.getDimX();
-    }
-
-    virtual uint32_t getDimK() const {
-        return cesf.getDimK();
-    }
-
-private:
-    double computeLoss() override {
-        return cesf.computeLoss();
-    }
-
-    std::pair<arma::Row<T> *, arma::Row<T> *> unpackModelOrGrad(arma::Row<T> * params) {
-        if (params->n_elem != this->numP) {
-            throw std::invalid_argument("Illegal length of passed vector");
-        }
-        T * rawPtr = params->memptr();
-        arma::Row<T> * params1 = newRowFixedSizeExternalMemory<T>(rawPtr, rnn.getNumP());
-        rawPtr += rnn.getNumP();
-        arma::Row<T> * params2 = newRowFixedSizeExternalMemory<T>(rawPtr, cesf.getNumP());
-        return std::pair<arma::Row<T> *, arma::Row<T> *>(params1, params2);
-    }
-
-    void setModelReferencesInPlace() override {
-        auto ret = unpackModelOrGrad(this->getModel());
-        rnnModel = ret.first;
-        cesfModel = ret.second;
-        rnn.setModelStorage(rnnModel);
-        cesf.setModelStorage(cesfModel);
-    }
-
-    void setGradientReferencesInPlace() override {
-        auto ret = unpackModelOrGrad(this->getModelGradient());
-        rnnGradient = ret.first;
-        cesfGradient = ret.second;
-        rnn.setGradientStorage(rnnGradient);
-        cesf.setGradientStorage(cesfGradient);
-    }
-
-    RnnLayer<T> rnn;
-    CESoftmaxNN<T, U> cesf;
-
-    arma::Row<T> * rnnModel, * cesfModel;
-    arma::Row<T> * rnnGradient, * cesfGradient;
-};
-
-
 void testGradients() {
-    const uint32_t dimx = 5, dimh = 7, dimk = 3;
+    const uint32_t dimX = 5, dimH = 7, dimK = 3;
     const uint32_t maxSeqLength = 22;
     const uint32_t seqLength = 20;
 
-    RnnSoftMax<double, int32_t> * rnnsf = new RnnSoftMax<double, int32_t>(dimx, dimh, dimk, maxSeqLength, "tanh");
-    LossNNManager<double, int32_t> manager(rnnsf);
+    RnnLayer<double> rnnLayer(dimX, dimH, maxSeqLength, "tanh");
+    CESoftmaxNN<double, int32_t> ceSoftmax(dimH, dimK);
+    ComponentAndLossWithMemory<double, int32_t> * rnnsf = new ComponentAndLossWithMemory<double, int32_t>(rnnLayer, ceSoftmax);
+    NNMemoryManager<double> manager(rnnsf);
 
     rnnsf->getModel()->randn();
 
-    arma::Mat<double> x(seqLength, dimx);
+    arma::Mat<double> x(seqLength, dimX);
     x.randn();
-    arma::Mat<int32_t> yTrue = arma::randi<arma::Mat<int32_t>>(seqLength, 1, arma::distr_param(0, dimk - 1));
+    arma::Mat<int32_t> yTrue = arma::randi<arma::Mat<int32_t>>(seqLength, 1, arma::distr_param(0, dimK - 1));
 
-    rnnsf->forward(x);
-    rnnsf->setTrueOutput(yTrue);
-
-    arma::Row<double> initialState(dimh);
+    arma::Row<double> initialState(dimH);
     initialState.randn();
     initialState *= 0.01;
+
+    rnnsf->setInitialHiddenState(initialState);
+    rnnsf->forward(x);
+    rnnsf->setTrueOutput(yTrue);
 
     const double tolerance = 1e-8;
 
@@ -237,7 +112,7 @@ void testGradients() {
     gcPassed = gradientCheckModelDouble(mgf, *(rnnsf->getModel()), tolerance, false);
     assert(gcPassed);
 
-    InputGradientNNFunctor<double, int32_t  > igf(*rnnsf, &initialState);
+    InputGradientNNFunctor<double, int32_t> igf(*rnnsf, &initialState);
     gcPassed = gradientCheckInputDouble(igf, x, tolerance, false);
     assert(gcPassed);
 }
@@ -273,9 +148,10 @@ void runSgd() {
     const uint32_t n = 1000;
     const uint32_t batchSize = 100;
 
-    // SoftmaxHiddenNN<T, int32_t> * lossNN = new SoftmaxHiddenNN<T, int32_t>(dimX, dimH, dimK, "tanh");
-    RnnSoftMax<T, int32_t> * lossNN = new RnnSoftMax<T, int32_t>(dimX, dimH, dimK, batchSize, "tanh");
-    LossNNManager<T, int32_t> lossNNmanager(lossNN);
+    RnnLayer<double> rnnLayer(dimX, dimH, batchSize, "tanh");
+    CESoftmaxNN<double, int32_t> ceSoftmax(dimH, dimK);
+    ComponentAndLossWithMemory<double, int32_t> * rnnsf = new ComponentAndLossWithMemory<double, int32_t>(rnnLayer, ceSoftmax);
+    NNMemoryManager<T> nnManager(rnnsf);
 
     // baseline is uniform at random predictions (i.e. all with equal probability)
     printf("Baseline loss: %f\n", log(dimK));
@@ -283,15 +159,14 @@ void runSgd() {
     arma::Mat<T> x(n, dimX);
     x.randn();
     arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(n, arma::distr_param(0, dimK - 1));
-    lossNN->modelGlorotInit();
+    rnnLayer.modelGlorotInit();
+    ceSoftmax.modelGlorotInit();
 
-    lossNN->modelGlorotInit();
-
-    DataFeeder<T, int32_t> * dataFeeder = new DataFeeder<T, int32_t>(x, yTrue, nullptr);
+    DataFeeder<T, int32_t> dataFeeder(x, yTrue, nullptr);
 
     SgdSolverBuilder<T> sb;
     sb.lr = 0.005;
-    sb.numEpochs = 40.0;
+    sb.numEpochs = 30.0;
     sb.minibatchSize = batchSize;
     sb.numItems = n;
     sb.solverType = SgdSolverType::adam;
@@ -305,15 +180,14 @@ void runSgd() {
 
     SgdSolver<T> * solver = sb.build();
 
-    train<T, int32_t>(*lossNN, *dataFeeder, *solver);
+    train<T, int32_t>(*rnnsf, dataFeeder, *solver);
 
     std::vector<ConvergenceData> convergence = solver->getConvergenceInfo();
     ConvergenceData last = convergence[convergence.size() - 1];
     assert(last.trainingLoss < 0.1 * log(dimK));
 
-    lossNN = nullptr;  // do not delete
+    rnnsf = nullptr;  // do not delete
     delete solver;
-    delete dataFeeder;
 }
 
 

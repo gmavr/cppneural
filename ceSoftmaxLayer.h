@@ -9,8 +9,8 @@ template <typename T, typename U>
 class CESoftmaxNN final : public SkeletalLossNN<T, U> {
 
 public:
-    CESoftmaxNN(uint32_t dimK_, uint32_t dimX_) : SkeletalLossNN<T, U>(dimK_ * dimX_ + dimK_),
-        dimK(dimK_), dimX(dimX_),
+    CESoftmaxNN(uint32_t dimX_, uint32_t dimK_) : SkeletalLossNN<T, U>(dimK_ * dimX_ + dimK_),
+        dimX(dimX_), dimK(dimK_),
         w(nullptr), dw(nullptr), b(nullptr), db(nullptr) {
     }
 
@@ -72,7 +72,6 @@ public:
         }
 
         this->loss = - arma::sum(arma::log(pOfTrue));
-        // printf("CESoftmaxNN::computeLoss=%f, numItems=%llu\n", this->loss, yTrue->n_rows);
         return this->loss;
     }
 
@@ -113,8 +112,7 @@ public:
     }
 
 private:
-    const uint32_t dimK;
-    const uint32_t dimX;
+    const uint32_t dimX, dimK;
 
     // dimX x DimK
     arma::Mat<T> * w;

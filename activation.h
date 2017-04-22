@@ -1,7 +1,12 @@
-#ifndef ACTIVATION_HPP_
-#define ACTIVATION_HPP_
+#ifndef ACTIVATION_H_
+#define ACTIVATION_H_
 
+#include <iostream>
+#include <stdexcept>
+#include <string>
 #include <utility>
+
+#include <armadillo>
 
 
 // In all following we expect (hope) that C++ return-value optimization (RVO) is used.
@@ -83,4 +88,4 @@ activationSelector(const std::string & activation) {
 }
 
 
-#endif /* ACTIVATION_HPP_ */
+#endif /* ACTIVATION_H_ */

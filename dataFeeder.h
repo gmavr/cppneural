@@ -1,15 +1,15 @@
 #ifndef DATAFEEDER_HPP_
 #define DATAFEEDER_HPP_
 
-#include <armadillo>
-
-#include <stdint.h>
+#include <cstdint>
 #include <cstdarg>
 #include <cstdio>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+#include <armadillo>
 
 
 // If OWN_DATA_COPY is defined then DataFeeder creates its own internal copy of data.

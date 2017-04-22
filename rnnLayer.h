@@ -20,11 +20,11 @@
 
 
 template <typename T>
-class RnnLayer final : public ComponentNN<T> {
+class RnnLayer final : public ComponentNNwithMemory<T> {
 
 public:
     RnnLayer(uint32_t dimX_, uint32_t dimH_, uint32_t maxSeqLength_, const std::string & activation)
-        : ComponentNN<T>((dimX_ + dimH_ + 1) * dimH_),
+        : ComponentNNwithMemory<T>((dimX_ + dimH_ + 1) * dimH_),
           dimX(dimX_), dimH(dimH_), maxSeqLength(maxSeqLength_),
           w_xh(nullptr), w_hh(nullptr), b(nullptr), dw_xh(nullptr), dw_hh(nullptr), db(nullptr),
           hs(dimH, maxSeqLength + 1), gradAct(maxSeqLength, dimH), dh2(dimH, maxSeqLength),
@@ -32,7 +32,7 @@ public:
           f(activationSelector<T>(activation).first),
           gradf(activationSelector<T>(activation).second),
           activationName(activation) {
-        resetHiddenState();
+        resetInitialHiddenState();
     }
 
     ~RnnLayer() {
@@ -40,11 +40,11 @@ public:
         delete dw_xh; delete dw_hh; delete db;
     }
 
-    void resetHiddenState() {
+    void resetInitialHiddenState() override {
         hs.col(seqLength).fill(0.0);
     }
 
-    void setInitialHiddenState(const arma::Row<T> & initialState) {
+    void setInitialHiddenState(const arma::Row<T> & initialState) override {
         if (initialState.n_elem != hs.n_rows) {
             throw std::logic_error("Attempt to set initial state of different dimensionality");
         }
@@ -226,7 +226,7 @@ private:
 };
 
 template <typename T>
-class RnnLayer1 final : public ComponentNN<T> {
+class RnnLayer1 final : public ComponentNNwithMemory<T> {
 
 public:
     RnnLayer1(uint32_t dimX_, uint32_t dimH_, uint32_t maxSeqLength_, const std::string & activation)
@@ -238,7 +238,7 @@ public:
           f(activationSelector<T>(activation).first),
           gradf(activationSelector<T>(activation).second),
           activationName(activation) {
-        resetHiddenState();
+        resetInitialHiddenState();
     }
 
     ~RnnLayer1() {
@@ -246,11 +246,11 @@ public:
         delete dw_xh; delete dw_hh; delete db;
     }
 
-    void resetHiddenState() {
+    void resetInitialHiddenState() override {
         hs.row(seqLength).fill(0.0);
     }
 
-    void setInitialHiddenState(const arma::Row<T> & initialState) {
+    void setInitialHiddenState(const arma::Row<T> & initialState) override {
         if (initialState.n_elem != hs.n_cols) {
             throw std::logic_error("Attempt to set initial state of different dimensionality");
         }
@@ -342,15 +342,13 @@ public:
 
         backPropagationLoop(deltaUpper, 0, seqLength);
 
-        arma::Mat<T> dh2trunc(dh2.rows(0, seqLength-1));
-
-        *db = arma::sum(dh2trunc, 0).t();
+        *db = arma::sum(dh2, 0).t();
         // (H, N) x (N, D) is the sum of outer products (H, 1) x (1, D) over the N samples
-        *dw_xh = dh2trunc.t() * (*(this->x));
+        *dw_xh = dh2.t() * (*(this->x));
         // (H, N) x (N, H) is the sum of outer products (H, 1) x (1, H) over the N samples
-        *dw_hh = dh2trunc.t() * (hs.rows(0, seqLength-1));
+        *dw_hh = dh2.t() * (hs.rows(0, seqLength-1));
 
-        *(this->inputGrad) = dh2trunc * (*w_xh);
+        *(this->inputGrad) = dh2 * (*w_xh);
 
         return this->inputGrad;
     }

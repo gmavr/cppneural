@@ -7,7 +7,9 @@
 
 void gradientCheckHiddenCESoftmax() {
     const int dimX = 3, dimH = 7, dimK = 5;
-    SoftmaxHiddenNN<double, int32_t> lossNN(dimX, dimH, dimK, "tanh");
+    NeuralLayer<double> nl(dimX, dimH, "tanh");
+    CESoftmaxNN<double, int32_t> ceSoftmax(dimH, dimK);
+    ComponentAndLoss<double, int32_t> lossNN(nl, ceSoftmax);
     const int numP = lossNN.getNumP();
     const int n = 11;
 

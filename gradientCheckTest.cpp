@@ -1,8 +1,9 @@
-#include "gradientCheck.h"
-#include "neuralUtil.h"
-#include "neuralLayer.h"
-
 #include <cassert>
+
+#include "gradientCheck.h"
+#include "layers.h"
+#include "neuralLayer.h"
+#include "util.h"
 
 
 bool testProjectionSumLoss() {

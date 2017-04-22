@@ -1,8 +1,8 @@
-#include "sgdSolver.h"
-#include "neuralUtil.h"
-
 #include <cassert>
-#include <cmath>
+
+#include "sgdSolver.h"
+#include "layers.h"
+#include "util.h"
 
 
 /**

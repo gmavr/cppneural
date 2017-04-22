@@ -1,12 +1,12 @@
 #ifndef _NEURAL_BASE_H_
 #define _NEURAL_BASE_H_
 
-#include <armadillo>
-
-#include <stdint.h>
+#include <cstdint>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
+
+#include <armadillo>
 
 /*
  * This file holds the core definitions of the library.
@@ -83,7 +83,7 @@ public:
     }
 
     /*
-     * Return dimensionality of input to this layer.
+     * Return dimensionality of input to this layer (for a single observation).
      */
     virtual uint32_t getDimX() const = 0;
 
@@ -265,6 +265,24 @@ protected:
 
 
 /**
+ * Networks that remember state from previous batch.
+ * Extends interface to reset and set that state.
+ */
+template <typename T>
+class ComponentNNwithMemory : public ComponentNN<T> {
+
+public:
+    ComponentNNwithMemory(uint32_t numP_) : ComponentNN<T>(numP_) { }
+
+    virtual ~ComponentNNwithMemory() { }
+
+    virtual void resetInitialHiddenState() = 0;
+
+    virtual void setInitialHiddenState(const arma::Row<T> & initialState) = 0;
+};
+
+
+/**
  * Neural Network with top-layer a scalar loss function for classification or regression.
  * For classification U is usually an (unsigned) integer type, for regression float or double.
  *
@@ -365,7 +383,9 @@ public:
         return std::pair<double, arma::Mat<T> *>(getLoss(), this->getInputGradient());
     }
 
-protected:
+    // computeLoss() should be protected, except for that clang is confused with ComponentAndLoss's
+    // invocation of computeLoss(); Make protected to see the problem.
+
     virtual double computeLoss() = 0;
 };
 
@@ -568,45 +588,39 @@ public:
 
 /**
  * Yet another wrapper class for RAII (Resource acquisition is initialization).
- * Assumes ownership of passed LossNN object in constructor and deletes it in destructor.
+ * Assumes ownership of passed CoreNN object in constructor and deletes it in destructor.
  * Use case is automatic allocation and deallocation of enclosed memory buffers
  * when this object is allocated on the stack.
- * TODO: Consider merging LossNNManager and ModelMemoryManager.
+ * TODO: Consider merging NNMemoryManager and ModelMemoryManager.
  */
-template <typename T, typename U>
-class LossNNManager final {
+template <typename T>
+class NNMemoryManager final {
 public:
     /**
-     * @param lossNN_ object will be owned and destructed by this object.
+     * @param nn object will be owned and destructed by this object.
      */
-    LossNNManager(LossNN<T, U> * lossNN_) : lossNN(lossNN_),
-            modelBuffer(new T[lossNN_->getNumP()]), gradientBuffer(new T[lossNN_->getNumP()]) {
-        arma::Row<T> * modelVec = newRowFixedSizeExternalMemory<T>(modelBuffer, lossNN->getNumP());
-        arma::Row<T> * gradientVec = newRowFixedSizeExternalMemory<T>(gradientBuffer, lossNN->getNumP());
-        lossNN->initParamsStorage(modelVec, gradientVec);
+    NNMemoryManager(CoreNN<T> * nn_) : nn(nn_),
+            modelBuffer(new T[nn_->getNumP()]), gradientBuffer(new T[nn_->getNumP()]) {
+        arma::Row<T> * modelVec = newRowFixedSizeExternalMemory<T>(modelBuffer, nn->getNumP());
+        arma::Row<T> * gradientVec = newRowFixedSizeExternalMemory<T>(gradientBuffer, nn->getNumP());
+        nn->initParamsStorage(modelVec, gradientVec);
         delete modelVec;
         delete gradientVec;
     }
 
-    ~LossNNManager() {
-        delete lossNN;
+    ~NNMemoryManager() {
+        delete nn;
+        delete [] modelBuffer;
+        delete [] gradientBuffer;
     }
 
-    LossNNManager(LossNNManager const &) = delete;
-    LossNNManager & operator=(LossNNManager const &) = delete;
-    LossNNManager(LossNNManager const &&) = delete;
-    LossNNManager & operator=(LossNNManager const &&) = delete;
-
-    uint32_t getNumP() const {
-        return lossNN->getNumP();
-    }
-
-    LossNN<T, U> * getLossNN() {
-        return lossNN;
-    }
+    NNMemoryManager(NNMemoryManager const &) = delete;
+    NNMemoryManager & operator=(NNMemoryManager const &) = delete;
+    NNMemoryManager(NNMemoryManager const &&) = delete;
+    NNMemoryManager & operator=(NNMemoryManager const &&) = delete;
 
 private:
-    LossNN<T, U> * lossNN;
+    CoreNN<T> * nn;
     T * const modelBuffer;
     T * const gradientBuffer;
 };
