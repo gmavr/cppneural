@@ -1,12 +1,12 @@
 ## Introduction
 
-An efficient C++11 implementation and framework for training neural networks. It has been explicitly designed with class hierarchy and generic code allowing for modular implementation and wiring of various types of neural network layers. It currently provides a standard feed-forward hidden layer, standard recurrent layer (RNN), multi-class logistic (softmax) regression output layer for classification and squared-error loss output layer for regression as elementary proof functionality. It includes implementation for three variants of stochastic gradient descend, with additional features such as periodic reporting of training loss and periodic evaluation on a held-out data set. It uses the [Armadillo C++ linear algebra library](http://arma.sourceforge.net) for efficient matrix operations.
+An efficient C++11 implementation and framework for training neural networks. It has been explicitly designed with class hierarchy and generic code allowing for modular implementation and wiring of various types of neural network layers. It currently provides a standard feed-forward hidden layer, standard and GRU recurrent layers (RNN), multi-class logistic (softmax) regression output layer for classification and squared-error loss output layer for regression as elementary functionality. It includes implementation for three variants of stochastic gradient descend, with additional features such as periodic reporting of training loss and periodic evaluation on a held-out data set. It uses the [Armadillo C++ linear algebra library](http://arma.sourceforge.net) for efficient matrix operations.
 
-This project was started as an experimental migration from python and numpy to C++ of a much more extensive neural network framework I wrote from scratch. (The python framework implements reccurrent layers including GRUs, embedding layers, extensions to batches of parallel sequencies, conditional random fields and has been used in a deep learning project). As such, it is almost certain that from an architecture point of view this C++ framework can extend to more complicated networks, but the additional effort to do it is obviously required.
+This project was started as an experimental migration from python and numpy to C++ of a much more extensive neural network framework I wrote from scratch. (The python framework implements recurrent layers including GRUs, embedding layers, extensions to batches of parallel sequences, conditional random fields and has been used in a deep learning project). As such, it is almost certain that from an architecture point of view this C++ framework can extend to more complicated networks, but the additional effort to do it is obviously required.
 
 ## Features
 
-* Very efficient implementation in C++11, also taking advantage of Armadillo’s template metaprogramming for consolidation of matrix operations at compilation time.
+* Very efficient implementation in C++11, also taking advantage of Armadillo’s template meta-programming for consolidation of matrix operations at compilation time.
 * Model and gradient of the full model are implemented each as single contiguous fixed memory buffer that is updated in-place, therefore zero model and gradient memory copies during training.
 * Modular framework for implementing types of network layers and wiring them together.
 * Gradient-check general support for verifying correctness of derivatives.
@@ -16,8 +16,10 @@ This project was started as an experimental migration from python and numpy to C
 * Configurable periodic reporting of training loss, optionally printable in real-time and programmatically available at the end of fitting procedure.
 * Optionally, configurable periodic evaluation on disjoint validation set and reporting of validation loss, printable in real-time and programmatically available at the end of fitting procedure.
 * Configurable periodic of storing models implemented, but unfortunately loading them not yet.
-* Single hidden layer with configurable tanh, sigmoid or relu activation functions.
+* Activation functions: hyperbolic tangent, logistic, ReLu 
+* Single hidden layer with configurable activation functions.
 * Recurrent Network layer with configurable activation function.
+* Gated Recurrent Unit layer.
 * Softmax classification layer with numerically stable softmax implementation.
 * All network size parameters are configurable.
 * Randomized Xavier Glorot initialization of model matrices.
@@ -35,9 +37,15 @@ We consider multi-layer neural networks where the top layer is a scalar loss fun
 
 The concatenation of the former across all layers is the derivative of the full model and is used by the stochastic gradient descend algorithm to determine the next value of the full model. The latter is necessary for computing the former: it allows back-propagating the error from the top-most scalar layer incrementally across each layer going to the bottom layer. 
 
-The general framewrok for supporting the above is in file `neuralBase.h`. Implementations of discrete layers are in files `neuralLayer.h` and `ceSoftmaxLayer.h`. File `neuralClassifier.h` shows how to build a network combining the above two layers.
+The general framework for supporting the above is in file `neuralBase.h`. Implementations of discrete layers are in files `neuralLayer.h` and `ceSoftmaxLayer.h`. File `neuralClassifier.h` shows how to build a network combining the above two layers.
 
-Note that the framework requires and supports the model and gradient of the full network to be each inside a contiguous memory buffer. The nested components model and gradient are references to the appropriate places inside these memory buffers that are defined at the top-most enclosing network object. These references are set recursively during wiring. During the fitting procedure, the model and gradient buffers are updated scrictly in-place and are *never* copied. These architectural features are critical for a very fast training procedure. The fitting procedure itself is inside `sgdSolver.h`.
+Note that the framework requires and supports the model and gradient of the full network to be each inside a contiguous memory buffer. The nested components model and gradient are references to the appropriate places inside these memory buffers that are defined at the top-most enclosing network object. These references are set recursively during wiring. During the fitting procedure, the model and gradient buffers are updated strictly in-place and are *never* copied. These architectural features are critical for a very fast training procedure. The fitting procedure itself is inside `sgdSolver.h`.
 
-For correctness, general support for gradient checks is inside `gradientCheck.h` and `gradientCheck.cpp`. Iteratively reading batches of data, with rewinding at the end of the data set, is implemented in `dataFeeder.h`.
+General support for gradient checks is inside `gradientCheck.h` and `gradientCheck.cpp`. Iteratively reading batches of data, with rewinding at the end of the data set, is implemented in `dataFeeder.h`. 
+
+## Correctness
+
+Anything having a gradient of (all layers, activation functions), as well as composite networks has a gradient check run as part of the test suite. Discrete layers are structured into simple networks with a loss function and test code trains them and verifies that the loss decreases.
+
+On ubuntu, all tests run without warnings under valgrind.
 

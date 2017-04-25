@@ -60,14 +60,13 @@ public:
     CoreNN(uint32_t numParameters)
         : modelStorageSet(false), model(nullptr),
           modelGradientStorageSet(false), modelGrad(nullptr),
-          inputGrad(new arma::Mat<T>()), x(nullptr),
+          inputGrad(), x(nullptr),
           numP(numParameters) {
     }
 
     virtual ~CoreNN() {
         delete model;
         delete modelGrad;
-        delete inputGrad;
     }
 
     CoreNN(CoreNN const &) = delete;
@@ -151,7 +150,7 @@ public:
      * Returned pointed object and enclosed memory owned by this object, caller may not delete it.
      */
     inline arma::Mat<T> * getInputGradient() {
-        return inputGrad;
+        return &inputGrad;
     }
 
     inline const arma::Mat<T> * getInput() const {
@@ -208,8 +207,7 @@ private:
     arma::Row<T> * modelGrad;
 
 protected:
-    // inputGrad owned by this object, underlying buffer managed by inputGrad itself
-    arma::Mat<T> * const inputGrad;
+    arma::Mat<T> inputGrad;  // underlying buffer managed by inputGrad itself
     const arma::Mat<T> * x;  // not owned by this object
     const uint32_t numP;
 };
@@ -537,6 +535,22 @@ void glorotInit(arma::Mat<T> & matrix) {
 }
 
 
+// needed for initializing matrix sub-views
+template <typename T>
+struct GlorotInitFunctor {
+    const double limit;
+
+    GlorotInitFunctor(unsigned nRows, unsigned nCols) : limit(sqrt(6.0 / (nRows + nCols))) { }
+
+    T operator()() {
+        T rand = arma::arma_rng::randu<T>();
+        rand -= 0.5;
+        rand *= 2 * limit;
+        return rand;
+    }
+};
+
+
 /**
  * Wrapper class for RAII (Resource acquisition is initialization).
  * Use case is automatic allocation and deallocation of enclosed memory buffers
@@ -556,29 +570,8 @@ public:
 
     ModelMemoryManager(ModelMemoryManager const &) = delete;
     ModelMemoryManager & operator=(ModelMemoryManager const &) = delete;
-#if 1
     ModelMemoryManager(ModelMemoryManager const &&) = delete;
     ModelMemoryManager & operator=(ModelMemoryManager const &&) = delete;
-#else
-    ModelMemoryManager(ModelMemoryManager const && rhs) :
-        numP(rhs.numP), modelBuffer(rhs.modelBuffer), gradientBuffer(rhs.gradientBuffer) {
-        // pillage and reset rhs
-        rhs.numP = 0;
-        rhs.modelBuffer = nullptr;
-        rhs.gradientBuffer = nullptr;
-    }
-
-    ModelMemoryManager & operator=(ModelMemoryManager const && rhs) {
-        // pillage and reset rhs
-        modelBuffer(rhs.modelBuffer);
-        gradientBuffer(rhs.gradientBuffer);
-        numP = rhs.numP;
-        rhs.numP = 0;
-        rhs.modelBuffer = nullptr;
-        rhs.gradientBuffer = nullptr;
-        return this;
-    }
-#endif
 
     const uint32_t numP;
     T * const modelBuffer;
@@ -618,6 +611,15 @@ public:
     NNMemoryManager & operator=(NNMemoryManager const &) = delete;
     NNMemoryManager(NNMemoryManager const &&) = delete;
     NNMemoryManager & operator=(NNMemoryManager const &&) = delete;
+
+    // test-only
+    const T * getModelBuffer() const {
+        return modelBuffer;
+    }
+
+    const T * getGradientBuffer() const {
+        return gradientBuffer;
+    }
 
 private:
     CoreNN<T> * nn;

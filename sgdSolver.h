@@ -336,8 +336,9 @@ void SgdSolver<T>::sgdRun() {
         std::time_t now_c = std::chrono::system_clock::to_time_t(now);
         char tbuf[128];
         std::strftime(tbuf, sizeof(tbuf), "%F %T", std::localtime(&now_c));
-        logToOutMsgStream("Starting SGD. Number iterations per epoch %.1f. Time: %s",
-                numIterationsPerEpoch, tbuf);
+        logToOutMsgStream(
+                "Starting SGD. Number parameters: %u. Number iterations per epoch %.1f. Time: %s",
+                (unsigned)x->n_cols, numIterationsPerEpoch, tbuf);
     }
 
     derivedInit();
@@ -417,8 +418,9 @@ void SgdSolver<T>::reportMetrics(uint32_t iterationIndex) {
         if (totalTrainingElapsed == 0.0) {
             // first time reporting
             double perBatchTimeElapsed = elapsed / (double) (nextReportIter - 0);
-            logToOutMsgStream("per batch time: %.4g sec, estimated per epoch time: %.3f hr",
-                    1e-9 * perBatchTimeElapsed, 1e-9 *(perBatchTimeElapsed * numIterationsPerEpoch) / 3600.0);
+            logToOutMsgStream("iteration %d: per batch time: %.4g sec, estimated per epoch time: %.3f hr",
+                    iterationIndex, 1e-9 * perBatchTimeElapsed,
+                    1e-9 *(perBatchTimeElapsed * numIterationsPerEpoch) / 3600.0);
         }
         logToOutMsgStream(
                 "iteration %d: epoch %.2f: smoothened loss: %f last loss: %f update ratio: %g",

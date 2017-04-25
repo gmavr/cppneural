@@ -114,8 +114,7 @@ public:
             hs.col(t+1) = f(zPartial2);
         }
 
-        // copies inside this->y but it does not change the location of memory buffer inside this->y
-        this->y = hs.cols(1, seqLength).t();  // [1, seqLength] both inclusive
+        this->y = hs.cols(1, seqLength).t();
         return &this->y;
     }
 
@@ -128,7 +127,8 @@ public:
             throw std::invalid_argument(fbuf);
         }
 
-        gradAct = gradf(this->y);
+        gradf(this->y, &gradAct);
+        // gradAct = gradf(this->y, nullptr); // no difference
 
         // underling memory buffer reallocation depends on batch sizes but should be very rare
         dh2.set_size(dimH, seqLength);
@@ -141,9 +141,9 @@ public:
         // (H, N) x (N, H) is the sum of outer products (H, 1) x (1, H) over the N samples
         *dw_hh = dh2 * (hs.cols(0, seqLength-1)).t();
 
-        *(this->inputGrad) = dh2.t() * (*w_xh);
+        this->inputGrad = dh2.t() * (*w_xh);
 
-        return this->inputGrad;
+        return &this->inputGrad;
     }
 
     uint32_t getDimX() const override {
@@ -163,6 +163,7 @@ public:
     }
 
 private:
+    // lowT inclusive, highT exclusive
     void backPropagationLoop(const arma::Mat<T> & deltaUpper, uint32_t lowT, uint32_t highT) {
         arma::Row<T> & dhNext = rowDimH;  // verified that underlying memory buffer re-used
         dhNext.fill(0.0);
@@ -220,7 +221,7 @@ private:
     uint32_t seqLength;
 
     arma::Mat<T> (*f)(const arma::Mat<T> &);
-    arma::Mat<T> (*gradf)(const arma::Mat<T> &);
+    arma::Mat<T> (*gradf)(const arma::Mat<T> &, arma::Mat<T> *);
 
     const std::string activationName;  // for reporting only
 };
@@ -321,8 +322,7 @@ public:
             hs.row(t+1) = f(zPartial2);
         }
 
-        // copies inside this->y but it does not change the location of memory buffer inside this->y
-        this->y = hs.rows(1, seqLength);  // [1, seqLength] both inclusive
+        this->y = hs.rows(1, seqLength);
         return &this->y;
     }
 
@@ -335,7 +335,7 @@ public:
             throw std::invalid_argument(fbuf);
         }
 
-        gradAct = gradf(this->y);
+        gradAct = gradf(this->y, nullptr);
 
         // underling memory buffer reallocation depends on batch sizes but should be very rare
         dh2.set_size(seqLength, dimH);
@@ -348,9 +348,9 @@ public:
         // (H, N) x (N, H) is the sum of outer products (H, 1) x (1, H) over the N samples
         *dw_hh = dh2.t() * (hs.rows(0, seqLength-1));
 
-        *(this->inputGrad) = dh2 * (*w_xh);
+        this->inputGrad = dh2 * (*w_xh);
 
-        return this->inputGrad;
+        return &this->inputGrad;
     }
 
     uint32_t getDimX() const override {
@@ -370,6 +370,7 @@ public:
     }
 
 private:
+    // lowT inclusive, highT exclusive
     void backPropagationLoop(const arma::Mat<T> & deltaUpper, uint32_t lowT, uint32_t highT) {
         arma::Row<T> & dhNext = rowDimH;
         dhNext.fill(0.0);
@@ -426,7 +427,7 @@ private:
     uint32_t seqLength;
 
     arma::Mat<T> (*f)(const arma::Mat<T> &);
-    arma::Mat<T> (*gradf)(const arma::Mat<T> &);
+    arma::Mat<T> (*gradf)(const arma::Mat<T> &, arma::Mat<T> *);
 
     const std::string activationName;  // for reporting only
 };

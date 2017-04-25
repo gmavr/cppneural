@@ -62,7 +62,6 @@ public:
         if (yTrue->n_rows != y.n_rows || yTrue->n_cols != 1 || y.n_cols != dimK) {
             throw std::invalid_argument("yTrue must be of shape (N, 1): ");
         }
-        // loss = - np.log(self.p_hat[xrange(num_samples), self._y_true])
 
         arma::Col<T> pOfTrue(yTrue->n_rows);
 
@@ -91,8 +90,8 @@ public:
         *db = arma::sum(deltaS, 0); // (N, K) reduced to (1, K)
 
         // (N, K) x (K, D) -> (N, D)
-        *(this->inputGrad) = deltaS * w->t();
-        return this->inputGrad;
+        this->inputGrad = deltaS * w->t();
+        return &this->inputGrad;
     }
 
     const arma::Mat<T> * getInputToTopLossLayer() const override {
@@ -107,8 +106,8 @@ public:
         return dimK;
     }
 
-    inline static uint32_t getStaticNumP(uint32_t dimK_, uint32_t dimX_) {
-        return dimK_ * dimX_ + dimK_;
+    inline static uint32_t getStaticNumP(uint32_t dimX, uint32_t dimK) {
+        return dimK * dimX + dimK;
     }
 
 private:

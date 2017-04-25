@@ -18,7 +18,7 @@ public:
           w(nullptr), dw(nullptr), b(nullptr), db(nullptr),
           f(activationSelector<T>(activation).first),
           gradf(activationSelector<T>(activation).second),
-          activationName(activation) {
+          deltaErr(), activationName(activation) {
     }
 
     ~NeuralLayer() {
@@ -50,7 +50,7 @@ public:
         }
         this->x = &input;
 
-        // not faster
+        // slower, even for very large n (=~1000), apparently transpose of input hurts(?)
         // arma::Mat<T> m = (*w) * input.t();
         // m.each_col() += (*b);
         // this->y = f(m.t());
@@ -72,15 +72,18 @@ public:
             throw std::invalid_argument(fbuf);
         }
 
-        const arma::Mat<T> deltaErr = gradf(this->y) % deltaUpper;  // element-wise product
+        // marginally faster to re-use pre-allocated deltaErr (2% for relu 70x90)
+        // but slower for smaller matrices
+        deltaErr.set_size(deltaUpper.n_rows, deltaUpper.n_cols);
+        deltaErr = gradf(this->y, nullptr) % deltaUpper;  // element-wise product
 
         // (Dy, N) x (N, Dx) is the sum of outer products (Dy, 1) x (1, Dx) over the N samples
         *dw = deltaErr.t() * (*(this->x));
         *db = arma::sum(deltaErr, 0).t();
 
-        *(this->inputGrad) = deltaErr * (*w);  // (N, Dy) x (Dy, Dx)
+        this->inputGrad = deltaErr * (*w);  // (N, Dy) x (Dy, Dx)
 
-        return this->inputGrad;
+        return &this->inputGrad;
     }
 
     uint32_t getDimX() const override {
@@ -132,7 +135,9 @@ private:
     arma::Col<T> * db;
 
     arma::Mat<T> (*f)(const arma::Mat<T> &);
-    arma::Mat<T> (*gradf)(const arma::Mat<T> &);
+    arma::Mat<T> (*gradf)(const arma::Mat<T> &, arma::Mat<T> *);
+
+    arma::Mat<T> deltaErr;
 
     const std::string activationName;  // for reporting only
 };

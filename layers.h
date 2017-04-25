@@ -8,7 +8,7 @@
  */
 
 /**
- * A squared error loss function top layer and an arbitrary network as the bottom layer.
+ * Squared error loss function top layer and arbitrary network as the bottom layer.
  */
 template <typename T>
 class CEL2LossNN final : public LossNN<T, T> {
@@ -36,14 +36,14 @@ public:
 
     double computeLoss() override {
         // delta_err is the derivative of loss w.r. to the input of this layer
-    	delta_err = componentNN.getOutput() - *(this->yTrue);  // element-wise subtraction
+    	delta_err = componentNN.getOutput() - *(this->yTrue);
         loss = 0.5 * arma::accu(arma::square(delta_err));  // element-wise squaring, then summation
         return loss;
     }
 
     arma::Mat<T> * backwards() override {
-        *(this->inputGrad) = *(componentNN.backwards(delta_err));  // memory copy
-        return this->inputGrad;
+        this->inputGrad = *(componentNN.backwards(delta_err));
+        return &this->inputGrad;
     }
 
     const arma::Mat<T> * getInputToTopLossLayer() const override {
@@ -70,10 +70,14 @@ private:
 };
 
 
+/**
+ * Very simple loss function:
+ * loss = sum_x [ W x + b ] with W matrix of shape 1xD, b scalar, x of shape D or NxD
+ */
 template <typename T>
 class ProjectionSumLoss final : public SkeletalLossNN<T, T> {
 
-    // y = sum_x [ W x + b ] with y scalar, W matrix of shape 1xD, b scalar, x of shape D or NxD
+    // y = sum_x [ w x + b ] with y scalar, w row vector 1xD, b scalar, x of shape D or batched NxD
 
 public:
     ProjectionSumLoss(uint32_t dimX_) : SkeletalLossNN<T, T>(dimX_ + 1), dimX(dimX_),
@@ -110,9 +114,9 @@ public:
         // I could not find another way to create a matrix with the same row repeated N times
         arma::Col<T> columnOnes(this->x->n_rows);
         columnOnes.ones();
-        *(this->inputGrad) = columnOnes * (*w);  // (N, 1) x (1, Dx)
+        this->inputGrad = columnOnes * (*w);  // (N, 1) x (1, Dx)
 
-        return this->inputGrad;
+        return &this->inputGrad;
     }
 
     double computeLoss() override {
@@ -197,8 +201,8 @@ public:
 
     inline arma::Mat<T> * backwards() override {
         arma::Mat<T> * deltaErr = topLayer.backwards();
-        *(this->inputGrad) = *(lowerLayer.backwards(*deltaErr));
-        return this->inputGrad;
+        this->inputGrad = *(lowerLayer.backwards(*deltaErr));
+        return &this->inputGrad;
     }
 
     virtual void setTrueOutput(const arma::Mat<U> & outputTrue) override {
@@ -258,7 +262,7 @@ private:
 
 
 /**
- * Extension of ComponentAndLoss for models that have an initial hidden state, most commoly coming
+ * Extension of ComponentAndLoss for models that have an initial hidden state, most commonly coming
  * from previous batch, such as RNNs.
  */
 template<typename T, typename U>

@@ -58,17 +58,18 @@ CORE_SRC_HEADERS := activation.h ceSoftmaxLayer.h dataFeeder.h neuralBase.h neur
 	nnAndData.h sgdSolver.h softmax.h
 TEST_HEADERS := gradientCheck.h util.h
 TEST_OBJS := gradientCheck.o
-TEST_EXECS := sgdSolverTest gradientCheckTest neuralLayerTest neuralClassifierTest rnnLayerTest softmaxTest
+TEST_EXECS := sgdSolverTest gradientCheckTest gruLayerTest neuralLayerTest neuralClassifierTest rnnLayerTest softmaxTest
 
 all: $(TEST_EXECS) spamClassifier
 
 run_tests: $(TEST_EXECS)
 	./gradientCheckTest
+	./sgdSolverTest
 	./neuralLayerTest
+	./softmaxTest
 	./neuralClassifierTest
 	./rnnLayerTest
-	./sgdSolverTest
-	./softmaxTest
+	./gruLayerTest
 
 gradientCheck.o: gradientCheck.cpp gradientCheck.h neuralBase.h
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -c -o $@ $<
@@ -85,6 +86,9 @@ neuralLayerTest: neuralLayerTest.cpp $(TEST_OBJS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
 rnnLayerTest: rnnLayerTest.cpp rnnLayer.h $(TEST_OBJS) $(CORE_SRC_HEADERS) $(TEST_HEADERS)
+	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
+
+gruLayerTest: gruLayerTest.cpp gruLayer.h $(TEST_OBJS) $(CORE_SRC_HEADERS) $(TEST_HEADERS)
 	$(CXX) $(CXXFLAGS_FINAL) -I $(INCLUDES) -o $@ $< $(TEST_OBJS) $(LIBS)
 
 sgdSolverTest: sgdSolver.h neuralBase.h layers.h nnAndData.h dataFeeder.h

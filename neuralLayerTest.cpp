@@ -72,13 +72,13 @@ void testLayer() {
 void testWithL2Loss() {
     const int dimX = 3, dimY = 2;
 
-    NeuralLayer<double> * nl = new NeuralLayer<double>(dimX, dimY, "tanh");
-    CEL2LossNN<double> * lossNN = new CEL2LossNN<double>(*nl);
+    NeuralLayer<double> nl(dimX, dimY, "tanh");
+    CEL2LossNN<double> * lossNN = new CEL2LossNN<double>(nl);
     NNMemoryManager<double> lossNNmanager(lossNN);
 
-    arma::Row<double> * modelVec = nl->getModel();
+    arma::Row<double> * modelVec = nl.getModel();
     const double * rawModelbuffer = modelVec->memptr();
-    const double * rawGradientBuffer = nl->getModelGradient()->memptr();
+    const double * rawGradientBuffer = nl.getModelGradient()->memptr();
     modelVec->ones();
     modelVec->at(0) = - 0.5;
     modelVec->at(dimX * dimY - 1) = -2.1;
@@ -95,7 +95,7 @@ void testWithL2Loss() {
     assert(1 - lossNN->getLoss() / expectedLoss < 1e-10);
 
     assert(rawModelbuffer == lossNN->getModel()->memptr());
-    assert(rawModelbuffer == nl->getModel()->memptr());
+    assert(rawModelbuffer == nl.getModel()->memptr());
     assert(rawGradientBuffer == lossNN->getModelGradient()->memptr());
     arma::Row<double> * grad = lossNN->getModelGradient();
     arma::Row<double> gradExpected = { -2.24040226, -2.21133777e-04, -1.60109846,
@@ -109,44 +109,35 @@ void testWithL2Loss() {
                                              { 0.0264098,  -0.05283295, -0.05281915}};
 
     assert(areAllClose(*inputGrad, inputGradExpected, 1e-6));
-
-    delete nl;
 }
 
 
 void testGradientforActivation(const std::string & activation) {
-    const unsigned dimx = 5, dimy = 7;
+    const unsigned dimX = 5, dimY = 7;
     const unsigned n = 11;
 
-    NeuralLayer<double> nl2(dimx, dimy, activation);
-    CEL2LossNN<double> lossNN(nl2);
+    NeuralLayer<double> nl(dimX, dimY, activation);
+    CEL2LossNN<double> * lossNN = new CEL2LossNN<double>(nl);
+    NNMemoryManager<double> nnManager(lossNN);
 
-    const uint32_t numP = lossNN.getNumP();
+    lossNN->getModel()->randn();
 
-    ModelMemoryManager<double> mm(numP);
-    arma::Row<double> modelVec(mm.modelBuffer, numP, false, true);
-    arma::Row<double> gradientVec(mm.gradientBuffer, numP, false, true);
-
-    lossNN.initParamsStorage(&modelVec, &gradientVec);
-
-    modelVec.randn();
-
-    arma::Mat<double> x(n, dimx);
-    arma::Mat<double> yTrue(n, dimy);
+    arma::Mat<double> x(n, dimX);
+    arma::Mat<double> yTrue(n, dimY);
     x.randn();
     yTrue.randn();
 
-    lossNN.forward(x);
-    lossNN.setTrueOutput(yTrue);
+    lossNN->forward(x);
+    lossNN->setTrueOutput(yTrue);
 
-    const double tolerance = 5e-9;
+    const double tolerance = 5e-7;
 
     bool gcPassed;
-    ModelGradientNNFunctor<double, double> mgf(lossNN);
-    gcPassed = gradientCheckModelDouble(mgf, *(lossNN.getModel()), tolerance, false);
+    ModelGradientNNFunctor<double, double> mgf(*lossNN);
+    gcPassed = gradientCheckModelDouble(mgf, *(lossNN->getModel()), tolerance, false);
     assert(gcPassed);
 
-    InputGradientNNFunctor<double, double> igf(lossNN);
+    InputGradientNNFunctor<double, double> igf(*lossNN);
     gcPassed = gradientCheckInputDouble(igf, x, tolerance, false);
     assert(gcPassed);
 }
