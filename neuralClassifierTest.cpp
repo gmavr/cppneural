@@ -7,39 +7,26 @@
 
 void gradientCheckHiddenCESoftmax() {
     const int dimX = 3, dimH = 7, dimK = 5;
-    NeuralLayer<double> nl(dimX, dimH, "tanh");
-    CESoftmaxNN<double, int32_t> ceSoftmax(dimH, dimK);
-    ComponentAndLoss<double, int32_t> lossNN(nl, ceSoftmax);
-    const int numP = lossNN.getNumP();
+    const double tolerance = 1e-9;
     const int n = 11;
 
-    arma::arma_rng::set_seed(47);
+    NeuralLayerByRow<double> nl(dimX, dimH, "tanh");
+    CESoftmaxNNbyRow<double, int32_t> ceSoftmax(dimH, dimK);
+    ComponentAndLoss<double, int32_t> * lossNN = new ComponentAndLoss<double, int32_t>(nl, ceSoftmax);
+    NNMemoryManager<double> lossNNmanager(lossNN);
 
-    arma::Mat<double> x(n, dimX);
-    x.randn();
-    arma::Mat<int32_t> yTrue = arma::randi<arma::Mat<int32_t>>(n, 1, arma::distr_param(0, dimK - 1));
+    lossNN->getModel()->randn();
 
-    ModelMemoryManager<double> mm(numP);
-    double * modelBuffer = mm.modelBuffer;
-    double * gradientBuffer = mm.gradientBuffer;
-
-    arma::Row<double> modelVec(modelBuffer, numP, false, true);
-    modelVec.randn();
-    arma::Row<double> gradientVec(gradientBuffer, numP, false, true);
-
-    lossNN.initParamsStorage(&modelVec, &gradientVec);
-
-    lossNN.forwardBackwards(x, yTrue);
-
-    const double tolerance = 1e-9;
+    arma::Mat<double> x = arma::randn<arma::Mat<double>>(n, dimX);
+    const arma::Mat<int32_t> yTrue = arma::randi<arma::Mat<int32_t>>(n, 1, arma::distr_param(0, dimK - 1));
 
     bool gcPassed;
 
-    ModelGradientNNFunctor<double, int32_t> mgf(lossNN);
-    gcPassed = gradientCheckModelDouble(mgf, *(lossNN.getModel()), tolerance, false);
+    ModelGradientNNFunctor<arma::Mat<double>, double, int32_t> mgf(*lossNN, x, yTrue);
+    gcPassed = gradientCheckModelDouble(mgf, *(lossNN->getModel()), tolerance, false);
     assert(gcPassed);
 
-    InputGradientNNFunctor<double, int32_t> igf(lossNN);
+    InputGradientNNFunctor<double, int32_t> igf(*lossNN, x, yTrue);
     gcPassed = gradientCheckInputDouble(igf, x, tolerance, false);
     assert(gcPassed);
 }
@@ -55,13 +42,10 @@ void runSgd() {
     // baseline is uniform at random predictions (i.e. all with equal probability)
     printf("Baseline loss: %f\n", log(dimK));
 
-    arma::arma_rng::set_seed(47);
+    const arma::Mat<T> x = arma::randn<arma::Mat<T>>(n, dimX);
+    const arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(n, arma::distr_param(0, dimK - 1));
 
-    arma::Mat<T> x(n, dimX);
-    x.randn();
-    arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(n, arma::distr_param(0, dimK - 1));
-
-    DataFeeder<T, int32_t> * dataFeeder = new DataFeeder<T, int32_t>(x, yTrue, nullptr);
+    DataFeeder<T, int32_t> * dataFeeder = new DataFeeder<T, int32_t>(&x, &yTrue, true, nullptr);
 
     SgdSolverBuilder<T> sb;
     sb.lr = 0.1;
@@ -96,6 +80,7 @@ void runSgd() {
 
 
 int main(int argc, char** argv) {
+    arma::arma_rng::set_seed(47);
     gradientCheckHiddenCESoftmax();
     runSgd<double>();
     std::cout << "Test " << __FILE__ << " passed" << std::endl;

@@ -130,7 +130,7 @@ public:
             throw std::invalid_argument("Validation set DataFeeder object not at the start of the data set.");
         }
 
-        LossNNAndDataFunctor<T, U> lossAndData(lossNN, dataFeeder, solver.getMinibatchSize(), outMsgStream);
+        LossNNAndDataFunctor<T, T, U> lossAndData(lossNN, dataFeeder, solver.getMinibatchSize(), outMsgStream);
         if (outMsgStream != nullptr) {
             char buf[256];
             arma::Row<T> * model = lossNN.getModel();
@@ -140,7 +140,7 @@ public:
             *outMsgStream << buf;
         }
         if (devDataFeeder != nullptr) {
-            LossNNAndDataFunctor<T, U> devLossAndData(lossNN, *devDataFeeder, 1024, outMsgStream);
+            LossNNAndDataFunctor<T, T, U> devLossAndData(lossNN, *devDataFeeder, 1024, outMsgStream);
             solver.sgd(lossAndData, devLossAndData);
         } else {
             solver.sgd(lossAndData);
@@ -157,7 +157,7 @@ public:
         if (dataFeeder.getItemsPerEpoch() < batchSize) {
             batchSize = dataFeeder.getItemsPerEpoch();
         }
-        LossNNAndDataFunctor<T, U> lossAndData(lossNN, dataFeeder, batchSize);
+        LossNNAndDataFunctor<T, T, U> lossAndData(lossNN, dataFeeder, batchSize);
         return lossAndData.forwardOnlyFullEpoch();
     }
 
@@ -165,17 +165,17 @@ public:
      * Compute the class probabilities for the inputs in the current position of dataFeeder
      * up to batchSize more samples or end of encapsulated data set inside the feeder whichever comes first.
      */
-    arma::Mat<T> predictBatch(DataFeederNoY<T> & dataFeederNoLabels, unsigned int batchSize) {
+    arma::Mat<T> predictBatch(DataFeeder<T, U> & dataFeederNoLabels, unsigned int batchSize) {
         if (dataFeederNoLabels.getItemsPerEpoch() < batchSize) {
             batchSize = dataFeederNoLabels.getItemsPerEpoch();
         }
-        const arma::Mat<T> & inputs = dataFeederNoLabels.getNextN(batchSize);
+        const arma::Mat<T> & inputs = dataFeederNoLabels.getNextX(batchSize);
         const arma::Mat<T> * probabilities = lossNN.forward(inputs);
         // intentionally return a copy because the original is modified inside the object in-place
         return arma::Mat<T>(*probabilities);
     }
 
-    arma::Mat<T> predictFullEpoch(DataFeederNoY<T> & dataFeederNoLabels, unsigned int batchSize=1024) {
+    arma::Mat<T> predictFullEpoch(DataFeeder<T, U> & dataFeederNoLabels, unsigned int batchSize=1024) {
         if (!dataFeederNoLabels.isAtEpochStart()) {
             throw std::invalid_argument("dataFeederNoLabels object not at the start of the data set.");
         }
@@ -187,7 +187,7 @@ public:
         }
         unsigned int i = 0;
         while (i < dataFeederNoLabels.getItemsPerEpoch()) {
-            const arma::Mat<T> & inputs = dataFeederNoLabels.getNextN(batchSize);
+            const arma::Mat<T> & inputs = dataFeederNoLabels.getNextX(batchSize);
             const arma::Mat<T> * probabilitiesBatch = lossNN.forward(inputs);
             probabilities.rows(i, i + inputs.n_rows - 1) = *probabilitiesBatch;
             i += inputs.n_rows;
@@ -205,8 +205,8 @@ public:
     }
 
 private:
-    NeuralLayer<T> nl;
-    CESoftmaxNN<T, U> ceSoftmax;
+    NeuralLayerByRow<T> nl;
+    CESoftmaxNNbyRow<T, U> ceSoftmax;
     ComponentAndLoss<T, U> lossNN;
     T * const modelBuffer;
     T * const gradientBuffer;

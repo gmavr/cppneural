@@ -10,14 +10,16 @@
 
 
 /**
- * Gated-Recurrent Unit Layer
+ * Gated-Recurrent Unit Layer.
+ *
+ * Observations are indexed by the second dimension.
  */
 template <typename T>
-class GruLayer final : public ComponentNNwithMemory<T> {
+class GruLayer final : public ComponentNNwithMemory<T,T> {
 
 public:
     GruLayer(uint32_t dimX_, uint32_t dimH_, uint32_t maxSeqLength_)
-        : ComponentNNwithMemory<T>(3 * (dimX_ + dimH_ + 1) * dimH_),
+        : ComponentNNwithMemory<T,T>(3 * (dimX_ + dimH_ + 1) * dimH_),
           dimX(dimX_), dimH(dimH_), maxSeqLength(maxSeqLength_),
           w(nullptr), u_zr(nullptr), u_h(nullptr), b(nullptr),
           dw(nullptr), du_zr(nullptr), du_h(nullptr), db(nullptr),
@@ -68,24 +70,24 @@ public:
     }
 
     arma::Mat<T> * forward(const arma::Mat<T> & input) override {
-        if (input.n_cols != dimX) {
-            throw std::invalid_argument("Illegal input column size: "
-                    + std::to_string(input.n_cols) + " expected: " + std::to_string(dimX));
+        // restore the last hidden state of the previous sequence
+        // (or what was set to via setInitialHiddenState())
+        hs.col(0) = hs.col(seqLength);  // use previous seqLength
+
+        seqLength = static_cast<uint32_t>(input.n_cols);
+        this->x = &input;
+
+        if (input.n_rows != dimX) {
+            throw std::invalid_argument("Illegal input row size: "
+                    + std::to_string(input.n_rows) + " expected: " + std::to_string(dimX));
         }
-        if (input.n_rows > maxSeqLength) {
-            throw std::invalid_argument("Too long sequence: length=" + std::to_string(input.n_rows)
+        if (seqLength > maxSeqLength) {
+            throw std::invalid_argument("Too long sequence: length=" + std::to_string(seqLength)
             + ", maximum allowed=" + std::to_string(maxSeqLength));
         }
 
-        // restore the last hidden state of the previous sequence
-        // (or what was set to via setInitialHiddenState())
-        hs.col(0) = hs.col(seqLength);
-
-        seqLength = static_cast<uint32_t>(input.n_rows);
-        this->x = &input;
-
         // (3*H, D) x (D, N) = (3*H, N)
-        arma::Mat<T> wb = (*w) * input.t();
+        arma::Mat<T> wb = (*w) * input;
         wb.each_col() += *b;
 
         // must truncate/expand otherwise access of garbage/non-existing columns in back-prop
@@ -107,16 +109,16 @@ public:
             hs.col(t+1) = oneMinusZ.col(t) % hs.col(t) + actOut_z.col(t) % actOut_h.col(t);
         }
 
-        this->y = hs.cols(1, seqLength).t();
+        this->y = hs.cols(1, seqLength);
         return &this->y;
     }
 
     arma::Mat<T> * backwards(const arma::Mat<T> & deltaUpper) override {
-        if (deltaUpper.n_rows != seqLength || deltaUpper.n_cols != dimH) {
+        if (deltaUpper.n_rows != dimH || deltaUpper.n_cols != seqLength) {
             char fbuf[256];
             snprintf(fbuf, sizeof(fbuf), "Illegal input shape: [%u, %u], expected [%u, %u]",
                     (unsigned)deltaUpper.n_rows, (unsigned)deltaUpper.n_cols,
-                    (unsigned)this->y.n_rows, (unsigned)dimH);
+                    (unsigned)dimH, (unsigned)seqLength);
             throw std::invalid_argument(fbuf);
         }
 
@@ -138,9 +140,10 @@ public:
         backPropagationLoop(deltaUpper, 0, seqLength, rhr);
 
         // accessing dh2 column-wise should be faster because matrices in armadillo are stored by
-        // column, but the following two implementations have indistinguishable running time for
-        // large matrices (dimH=400) on mac os clang++ 03
-#if 0
+        // column, but the following two implementations have indistinguishable running time (or
+        // the possibly the row one is marginally faster) for large matrices (dimH=400, N=1000)
+        // on mac os clang++ -03
+#if 1
         dh2.set_size(3 * dimH, seqLength);
         dh2.rows(2*dimH, 3*dimH-1) = (zProdGrad % dh);
         dh2.rows(0, dimH-1) = (hTildeMinusHprodGrad % dh);
@@ -153,7 +156,7 @@ public:
         *db = arma::sum(dh2, 1);
 
         // (3*H, N) x (N, D)
-        *dw = dh2 * (*(this->x));
+        *dw = dh2 * this->x->t();
 
         // (2*H, N) x (N, H)
         *du_zr = dh2.rows(0, 2*dimH-1) * hs.cols(0, seqLength-1).t();
@@ -161,7 +164,9 @@ public:
         *du_h = dh2.rows(2*dimH, 3*dimH-1) * rProdH.cols(0, seqLength-1).t();
 
         // (H, 3*H) x (3*H, D)
-        this->inputGrad = dh2.t() * (*w);
+        this->inputGrad = (dh2.t() * (*w)).t();
+        // for dimH = 400, D=500 the above is much faster than following
+        // this->inputGrad = w->t() * dh2;
 #else
         dh2.set_size(seqLength, 3 * dimH);
         dh2.cols(2*dimH, 3*dimH-1) = (zProdGrad % dh).t();
@@ -174,15 +179,23 @@ public:
 
         *db = arma::sum(dh2, 0).t();
 
-        *dw = dh2.t() * (*(this->x));
+        // ((D, N) x (N, 3*H))^T = (3*H, D)
+        *dw = ((*this->x) * dh2).t();
+        // *dw = dh2.t() * (this->x->t());
 
         // (2*H, N) x (N, H)
         *du_zr = dh2.cols(0, 2*dimH-1).t() * hs.cols(0, seqLength-1).t();
         // (H, N) x (N, H)
         *du_h = dh2.cols(2*dimH, 3*dimH-1).t() * rProdH.cols(0, seqLength-1).t();
+        // for dimH = 400, N = 1000 the above 2 are much faster than following 2, but armadillo
+        // should generate identical code
+        // *du_zr = (hs.cols(0, seqLength-1) * dh2.cols(0, 2*dimH-1)).t();
+        // *du_h = (rProdH.cols(0, seqLength-1) * dh2.cols(2*dimH, 3*dimH-1)).t();
 
-        // (H, 3*H) x (3*H, D)
-        this->inputGrad = dh2 * (*w);
+        // ((H, 3*H) x (3*H, D))^T
+        this->inputGrad = (dh2 * (*w)).t();
+        // for dimH = 400, D=500 the above is much faster than following
+        // this->inputGrad = w->t() * dh2.t();
 #endif
         return &this->inputGrad;
     }
@@ -212,13 +225,13 @@ private:
     }
 
     // lowT inclusive, highT exclusive
-    void backPropagationLoop(const arma::Mat<T> & deltaUpper1, uint32_t lowT, uint32_t highT,
+    void backPropagationLoop(const arma::Mat<T> & deltaUpper, uint32_t lowT, uint32_t highT,
             const arma::Cube<T> & rhr) {
         arma::Row<T> & dhNext = rowDimH;
         // for large seqLength (500) and dimH (400), it is measurably faster to first copy
         // deltaUpper, transpose it and then access it column by column than not-copying but
         // accessing it row by row
-        const arma::Mat<T> deltaUpper = deltaUpper1.t();
+        // const arma::Mat<T> deltaUpper = deltaUpper1.t();
         dh.col(highT - 1) = deltaUpper.col(highT - 1);
         // use signed integer of longer precision for decrement beyond 0 to not wrap-around.
         for (int64_t t = highT - 2; t >= lowT; t--) {

@@ -80,7 +80,8 @@ public:
     SgdSolver & operator=(SgdSolver const &&) = delete;
 
     /**
-     * For SGD and testing layer gradient w.r.to part of the model held in that layer.
+     * Train in-place the model held inside function using SGD.
+     * See details in {@link ModelGradientFunctor} for contract documentation.
      */
     void sgd(ModelGradientFunctor<T> & functor_);
 
@@ -245,11 +246,6 @@ SgdSolver<T>::toString() const {
 }
 
 
-/**
- * For SGD and testing layer gradient w.r.to part of the model held in that layer.
- * Use this method for functor objects that contain inside them a reference
- * to the model object.
- */
 template <typename T>
 void SgdSolver<T>::sgd(ModelGradientFunctor<T> & functor_) {
     if (logLevel >= SgdSolverLogLevel::verbose) {

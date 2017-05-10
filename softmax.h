@@ -3,11 +3,14 @@
 
 #include <armadillo>
 
+
 /**
- * Computes the softmax function for each row of the input 2-d array.
+ * Computes the softmax function for each row of the input matrix.
+ * @param input matrix where each observation is contained in a row
+ * @return softmax by row
  */
 template <typename T>
-arma::Mat<T> softmax(const arma::Mat<T> & x) {
+arma::Mat<T> softmaxByRow(const arma::Mat<T> & x) {
     const arma::Col<T> w = arma::max(x, 1);
     const arma::Mat<T> exps = arma::exp(x.each_col() - w);
     const arma::Col<T> sumExps = arma::sum(exps, 1);
@@ -15,9 +18,23 @@ arma::Mat<T> softmax(const arma::Mat<T> & x) {
 }
 
 
+/**
+ * Computes the softmax function for each column of the input matrix.
+ * @param input matrix where each observation is contained in a column
+ * @return softmax by column
+ */
+template <typename T>
+arma::Mat<T> softmaxByColumn(const arma::Mat<T> & x) {
+    const arma::Row<T> w = arma::max(x, 0);
+    const arma::Mat<T> exps = arma::exp(x.each_row() - w);
+    const arma::Row<T> sumExps = arma::sum(exps, 0);
+    return exps.each_row() / sumExps;
+}
+
+
 template <typename T>
 std::pair<arma::Mat<T>, arma::Mat<T>>
-softmaxWithGrad(const arma::Mat<T> & x) {
+softmaxByRowWithGrad(const arma::Mat<T> & x) {
     const arma::Col<T> w = arma::max(x, 1);
     const arma::Mat<T> exps = arma::exp(x.each_col() - w);
     const arma::Col<T> sumExps = arma::sum(exps, 1);

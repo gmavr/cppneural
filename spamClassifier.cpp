@@ -103,7 +103,7 @@ void testParseLine() {
 
 
 void evaluate2Classes(ModelHolder<double, int> * modelHolder,
-        DataFeederNoY<double> & dataFeederTestNoL,
+        DataFeeder<double, int> & dataFeederTestNoL,
         const arma::Col<int> & testY,
         unsigned int testBatchSize) {
 
@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
         throw std::invalid_argument("Inconsistent number of observations");
     }
 
-    DataFeeder<double, int> dataFeeder(trainX, trainY, nullptr);
+    DataFeeder<double, int> dataFeeder(&trainX, &trainY, true);
 
     SgdSolverBuilder<double> sb;
     sb.lr = 0.1;
@@ -196,7 +196,7 @@ int main(int argc, char** argv) {
         throw std::invalid_argument("Inconsistent number of observations");
     }
 
-    DataFeeder<double, int> dataFeederTest(testX, testY, nullptr);
+    DataFeeder<double, int> dataFeederTest(&testX, &testY, true);
 
     try {
         modelHolder->train(dataFeeder, *solver, &dataFeederTest);
@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
     double testLoss = modelHolder->forwardOnlyFullEpoch(dataFeederTest, 100);
     std::cout << "testLoss = " << testLoss << std::endl;
 
-    DataFeederNoY<double> dataFeederTestNoL(testX, nullptr);
+    DataFeeder<double, int> dataFeederTestNoL(&testX, nullptr, true);
 
     evaluate2Classes(modelHolder, dataFeederTestNoL, testY, 200);
 

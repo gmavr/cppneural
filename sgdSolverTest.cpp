@@ -94,29 +94,20 @@ void testSaddleFunc() {
 
 void testProjectionSumLoss() {
     const int dimX = 7;
-    const int numP = dimX + 1;
     const int n = 19;
 
-    arma::Mat<double> x = arma::Mat<double>(n, dimX);
-    arma::Mat<double> yTrue = arma::Mat<double>(n, 1);
-
-    ModelMemoryManager<double> mm(numP);
-    double * modelBuffer = mm.modelBuffer;
-    double * gradientBuffer = mm.gradientBuffer;
-
-    arma::Row<double> modelVec(modelBuffer, numP, false, true);
-    arma::Row<double> gradientVec(gradientBuffer, numP, false, true);
-
     arma::arma_rng::set_seed(47);
-    x.randn();
-    yTrue.randn();
-    modelVec.randn();
 
-    ProjectionSumLoss<double> lossNN(dimX);
-    lossNN.initParamsStorage(&modelVec, &gradientVec);
+    ProjectionSumLoss<double> *lossNN = new ProjectionSumLoss<double>(dimX);
+    NNMemoryManager<double> lossNNmanager(lossNN);
 
-    lossNN.forward(x);
-    lossNN.setTrueOutput(yTrue);  // ignored in this loss object
+    const double * modelBuffer = lossNN->getModel()->memptr();
+
+    lossNN->getModel()->randn();
+
+    arma::Mat<double> x = arma::randn<arma::Mat<double>>(n, dimX);
+    // yTrue is ignored in the ProjectionSumLoss object
+    const arma::Mat<double> yTrue = arma::randn<arma::Mat<double>>(n, 1);
 
     SgdSolverBuilder<double> solverBuilder;
     solverBuilder.lr = 0.001;
@@ -128,7 +119,7 @@ void testProjectionSumLoss() {
     solverBuilder.solverType = SgdSolverType::momentum;
     SgdSolver<double> * solver = solverBuilder.build();
 
-    ModelGradientNNFunctor<double, double> mgf(lossNN);
+    ModelGradientNNFunctor<arma::Mat<double>, double, double> mgf(*lossNN, x, yTrue);
 
     solver->sgd(mgf);
 

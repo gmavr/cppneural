@@ -1,12 +1,10 @@
-#include <armadillo>
-
 #include <cassert>
 #include <cstdio>
 #include <iostream>
 
+#include "gradientCheck.h"
 #include "layers.h"
 #include "neuralLayer.h"
-#include "gradientCheck.h"
 #include "util.h"
 
 /*
@@ -20,7 +18,7 @@ void testLayerForExpected(const arma::Mat<double> & yExpected,
     const int dimX = 3, dimY = 2;
     double tolerance = 1e-6;
 
-    NeuralLayer<double> * nl = new NeuralLayer<double>(dimX, dimY, activation);
+    NeuralLayerByRow<double> * nl = new NeuralLayerByRow<double>(dimX, dimY, activation);
     NNMemoryManager<double> lossNNmanager(nl);
 
     arma::Row<double> * modelVec = nl->getModel();
@@ -45,6 +43,21 @@ void testLayerForExpected(const arma::Mat<double> & yExpected,
     arma::Mat<double> * delta = nl->backwards(deltaUpper);
     assert(areAllClose(*delta, deltaExpected, tolerance));
     assert(rawGradientBuffer == nl->getModelGradient()->memptr());
+
+    NeuralLayer<double> * nl2 = new NeuralLayer<double>(dimX, dimY, activation);
+    NNMemoryManager<double> lossNNmanager2(nl2);
+
+    arma::Row<double> * modelVec2 = nl2->getModel();
+    // for the particular way we populated modelVec, it is correct to just copy and expect same results
+    *modelVec2 = *modelVec;
+
+    arma::Mat<double> x2(x.t());
+    // passing x.t() to forward(.) would cause create a pointer to temporary!
+    arma::Mat<double> * y2 = nl2->forward(x2);
+    assert(arma::all(arma::vectorise(y2->t() == *y)));
+
+    arma::Mat<double> * delta2 = nl2->backwards(deltaUpper.t());
+    assert(arma::all(arma::vectorise(delta2->t() == *delta)));
 }
 
 
@@ -72,7 +85,7 @@ void testLayer() {
 void testWithL2Loss() {
     const int dimX = 3, dimY = 2;
 
-    NeuralLayer<double> nl(dimX, dimY, "tanh");
+    NeuralLayerByRow<double> nl(dimX, dimY, "tanh");
     CEL2LossNN<double> * lossNN = new CEL2LossNN<double>(nl);
     NNMemoryManager<double> lossNNmanager(lossNN);
 
@@ -113,32 +126,48 @@ void testWithL2Loss() {
 
 
 void testGradientforActivation(const std::string & activation) {
+    std::cout << "activation=" << activation << std::endl;
+
     const unsigned dimX = 5, dimY = 7;
     const unsigned n = 11;
+    const double tolerance = 5e-7;
 
-    NeuralLayer<double> nl(dimX, dimY, activation);
+    std::cout << "Indexing by row" << std::endl;
+
+    NeuralLayerByRow<double> nl(dimX, dimY, activation);
     CEL2LossNN<double> * lossNN = new CEL2LossNN<double>(nl);
     NNMemoryManager<double> nnManager(lossNN);
 
     lossNN->getModel()->randn();
-
-    arma::Mat<double> x(n, dimX);
-    arma::Mat<double> yTrue(n, dimY);
-    x.randn();
-    yTrue.randn();
-
-    lossNN->forward(x);
-    lossNN->setTrueOutput(yTrue);
-
-    const double tolerance = 5e-7;
+    arma::Mat<double> x = arma::randn<arma::Mat<double>>(n, dimX);
+    const arma::Mat<double> yTrue = arma::randn<arma::Mat<double>>(n, dimY);
 
     bool gcPassed;
-    ModelGradientNNFunctor<double, double> mgf(*lossNN);
+    ModelGradientNNFunctor<arma::Mat<double>, double, double> mgf(*lossNN, x, yTrue);
     gcPassed = gradientCheckModelDouble(mgf, *(lossNN->getModel()), tolerance, false);
     assert(gcPassed);
 
-    InputGradientNNFunctor<double, double> igf(*lossNN);
+    InputGradientNNFunctor<double, double> igf(*lossNN, x, yTrue);
     gcPassed = gradientCheckInputDouble(igf, x, tolerance, false);
+    assert(gcPassed);
+
+    std::cout << "Indexing by column" << std::endl;
+
+    NeuralLayer<double> nl2(dimX, dimY, activation);
+    CEL2LossNN<double> * lossNN2 = new CEL2LossNN<double>(nl2);
+    NNMemoryManager<double> nnManager2(lossNN2);
+
+    *lossNN2->getModel() = *lossNN->getModel();
+
+    arma::Mat<double> x2(x.t());
+    const arma::Mat<double> yTrue2(yTrue.t());
+
+    ModelGradientNNFunctor<arma::Mat<double>, double, double> mgf2(*lossNN2, x2, yTrue2);
+    gcPassed = gradientCheckModelDouble(mgf2, *(lossNN2->getModel()), tolerance, false);
+    assert(gcPassed);
+
+    InputGradientNNFunctor<double, double> igf2(*lossNN2, x2, yTrue2);
+    gcPassed = gradientCheckInputDouble(igf2, x2, tolerance, false);
     assert(gcPassed);
 }
 

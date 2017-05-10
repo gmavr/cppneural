@@ -51,7 +51,7 @@ arma::Mat<T> activationLogisticGradient(const arma::Mat<T> & in, arma::Mat<T> * 
 
 template <typename T>
 arma::Mat<T> activationRelu(const arma::Mat<T> & in) {
-    return arma::clamp(in, 0.0, in.max());
+    return arma::clamp(in, 0.0, arma::datum::inf);
 }
 
 template <typename T>

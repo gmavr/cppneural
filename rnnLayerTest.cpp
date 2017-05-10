@@ -20,7 +20,7 @@ void testLayer() {
     const int dimx = 3, dimh = 2;
     const int maxSeqLength = 5;
 
-    RnnLayer<double> * rnn = new RnnLayer<double>(dimx, dimh, maxSeqLength, "tanh");
+    RnnLayerByRow<double> * rnn = new RnnLayerByRow<double>(dimx, dimh, maxSeqLength, "tanh");
     NNMemoryManager<double> memManager(rnn);
 
     assert(memManager.getModelBuffer() == rnn->getModel()->memptr());
@@ -79,41 +79,55 @@ void testGradients() {
     const uint32_t dimX = 5, dimH = 7, dimK = 3;
     const uint32_t maxSeqLength = 22;
     const uint32_t seqLength = 20;
+    const double tolerance = 1e-8;
 
-    RnnLayer<double> rnnLayer(dimX, dimH, maxSeqLength, "tanh");
-    CESoftmaxNN<double, int32_t> ceSoftmax(dimH, dimK);
-    ComponentAndLossWithMemory<double, int32_t> * rnnsf = new ComponentAndLossWithMemory<double, int32_t>(rnnLayer, ceSoftmax);
-    NNMemoryManager<double> manager(rnnsf);
+    RnnLayerByRow<double> rnnLayer1(dimX, dimH, maxSeqLength, "tanh");
+    CESoftmaxNNbyRow<double, int32_t> ceSoftmax1(dimH, dimK);
+    ComponentAndLossWithMemory<double, int32_t> * rnnsf1
+        = new ComponentAndLossWithMemory<double, int32_t>(rnnLayer1, ceSoftmax1);
+    NNMemoryManager<double> manager1(rnnsf1);
 
-    rnnsf->getModel()->randn();
+    rnnsf1->getModel()->randn();
 
-    arma::Mat<double> x(seqLength, dimX);
-    x.randn();
-    arma::Mat<int32_t> yTrue = arma::randi<arma::Mat<int32_t>>(seqLength, 1, arma::distr_param(0, dimK - 1));
+    arma::Mat<double> x = arma::randn<arma::Mat<double>>(seqLength, dimX);
+    const arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(seqLength, arma::distr_param(0, dimK - 1));
 
     arma::Row<double> initialState(dimH);
     initialState.randn();
     initialState *= 0.01;
 
-    rnnsf->setInitialHiddenState(initialState);
-    rnnsf->forward(x);
-    rnnsf->setTrueOutput(yTrue);
-
-    const double tolerance = 1e-8;
-
     bool gcPassed;
-    ModelGradientNNFunctor<double, int32_t> mgf(*rnnsf, &initialState);
-    gcPassed = gradientCheckModelDouble(mgf, *(rnnsf->getModel()), tolerance, false);
+    ModelGradientNNFunctor<arma::Mat<double>, double, int32_t> mgf(*rnnsf1, x, yTrue, &initialState);
+    gcPassed = gradientCheckModelDouble(mgf, *(rnnsf1->getModel()), tolerance, false);
     assert(gcPassed);
 
-    InputGradientNNFunctor<double, int32_t> igf(*rnnsf, &initialState);
+    InputGradientNNFunctor<double, int32_t> igf(*rnnsf1, x, yTrue, &initialState);
     gcPassed = gradientCheckInputDouble(igf, x, tolerance, false);
+    assert(gcPassed);
+
+    RnnLayer<double> rnnLayer2(dimX, dimH, maxSeqLength, "tanh");
+    CESoftmaxNN<double, int32_t> ceSoftmax2(dimH, dimK);
+    ComponentAndLossWithMemory<double, int32_t> * rnnsf2
+        = new ComponentAndLossWithMemory<double, int32_t>(rnnLayer2, ceSoftmax2);
+    NNMemoryManager<double> manager2(rnnsf2);
+
+    *rnnsf2->getModel() = *rnnsf1->getModel();
+
+    arma::Mat<double> x2(x.t());
+    const arma::Row<int32_t> yTrue2(yTrue.t());
+
+    ModelGradientNNFunctor<arma::Mat<double>, double, int32_t> mgf2(*rnnsf2, x2, yTrue2, &initialState);
+    gcPassed = gradientCheckModelDouble(mgf2, *(rnnsf2->getModel()), tolerance, false);
+    assert(gcPassed);
+
+    InputGradientNNFunctor<double, int32_t> igf2(*rnnsf2, x2, yTrue2, &initialState);
+    gcPassed = gradientCheckInputDouble(igf2, x2, tolerance, false);
     assert(gcPassed);
 }
 
 
 template<typename T, typename U>
-void train(LossNN<T, U> & lossNN, DataFeeder<T, U> & dataFeeder, SgdSolver<T> & solver,
+void train(ComponentAndLoss<T, U> & lossNN, DataFeeder<T, U> & dataFeeder, SgdSolver<T> & solver,
         DataFeeder<T, U> * devDataFeeder = nullptr) {
     // verify (early) size compatibilities
     if (dataFeeder.getDimX() != lossNN.getDimX()) {
@@ -126,13 +140,73 @@ void train(LossNN<T, U> & lossNN, DataFeeder<T, U> & dataFeeder, SgdSolver<T> & 
         throw std::invalid_argument("Validation set DataFeeder object not at the start of the data set.");
     }
 
-    LossNNAndDataFunctor<T, U> lossAndData(lossNN, dataFeeder, solver.getMinibatchSize(), nullptr);
+    LossNNAndDataFunctor<T, T, U> lossAndData(lossNN, dataFeeder, solver.getMinibatchSize(), nullptr);
     if (devDataFeeder != nullptr) {
-        LossNNAndDataFunctor<T, U> devLossAndData(lossNN, *devDataFeeder, 1024, nullptr);
+        LossNNAndDataFunctor<T, T, U> devLossAndData(lossNN, *devDataFeeder, 1024, nullptr);
         solver.sgd(lossAndData, devLossAndData);
     } else {
         solver.sgd(lossAndData);
     }
+}
+
+
+void showRunningTime() {
+    // const uint32_t dimX = 5, dimH = 7;
+    // const uint32_t n = 17;
+    const uint32_t dimX = 500, dimH = 400;
+    const uint32_t n = 1000;
+    const uint32_t maxSeqLength = n;
+    const uint32_t seqLength = n;
+
+    RnnLayerByRow<double> * rnn1 = new RnnLayerByRow<double>(dimX, dimH, maxSeqLength, "relu");
+    NNMemoryManager<double> memManager1(rnn1);
+
+    rnn1->getModel()->randn();
+
+    const arma::Mat<double> x = arma::randn<arma::Mat<double>>(seqLength, dimX);
+    const arma::Mat<double> deltaUpper = arma::randn<arma::Mat<double>>(seqLength, dimH);
+
+    arma::Row<double> initialState(dimH);
+    initialState.randn();
+    initialState *= 0.01;
+
+    rnn1->setInitialHiddenState(initialState);
+    rnn1->forward(x);
+
+    auto startTime = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < 10; i++) {
+        // rnn1->forward(x);
+        rnn1->backwards(deltaUpper);
+    }
+
+    auto diff = std::chrono::steady_clock::now() - startTime;
+    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(diff).count();
+
+    printf("elapsed=%.5f\n", 1e-9 * elapsed);
+
+    RnnLayer<double> * rnn2 = new RnnLayer<double>(dimX, dimH, maxSeqLength, "relu");
+    NNMemoryManager<double> memManager2(rnn2);
+
+    *rnn2->getModel() = *rnn1->getModel();
+
+    const arma::Mat<double> x2(x.t());
+    const arma::Mat<double> deltaUpper2(deltaUpper.t());
+
+    rnn2->setInitialHiddenState(initialState);
+    rnn2->forward(x2);
+
+    auto startTime2 = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < 10; i++) {
+        // rnn2->forward(x2);
+        rnn2->backwards(deltaUpper2);
+    }
+
+    auto diff2 = std::chrono::steady_clock::now() - startTime2;
+    double elapsed2 = std::chrono::duration_cast<std::chrono::nanoseconds>(diff2).count();
+
+    printf("elapsed=%.5f\n", 1e-9 * elapsed2);
 }
 
 
@@ -142,21 +216,31 @@ void runSgd() {
     const uint32_t n = 1000;
     const uint32_t batchSize = 100;
 
+#if 0
+    RnnLayerByRow<T> rnnLayer(dimX, dimH, batchSize, "tanh");
+    CESoftmaxNNbyRow<T, int32_t> ceSoftmax(dimH, dimK);
+
+    const arma::Mat<double> x = arma::randn<arma::Mat<double>>(n, dimX);
+    const arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(n, arma::distr_param(0, dimK - 1));
+
+    DataFeeder<T, int32_t> dataFeeder(&x, &yTrue, true, nullptr);
+#else
     RnnLayer<T> rnnLayer(dimX, dimH, batchSize, "tanh");
     CESoftmaxNN<T, int32_t> ceSoftmax(dimH, dimK);
-    ComponentAndLossWithMemory<T, int32_t> * rnnsf = new ComponentAndLossWithMemory<T, int32_t>(rnnLayer, ceSoftmax);
+
+    const arma::Mat<double> x = arma::randn<arma::Mat<double>>(dimX, n);
+    const arma::Row<int32_t> yTrue = arma::randi<arma::Row<int32_t>>(n, arma::distr_param(0, dimK - 1));
+    DataFeeder<T, int32_t> dataFeeder(&x, &yTrue, false, nullptr);
+#endif
+
+    ComponentAndLossWithMemory<T, int32_t> * rnnsf
+        = new ComponentAndLossWithMemory<T, int32_t>(rnnLayer, ceSoftmax);
     NNMemoryManager<T> nnManager(rnnsf);
-
-    // baseline is uniform at random predictions (i.e. all with equal probability)
-    printf("Baseline loss: %f\n", log(dimK));
-
-    arma::Mat<T> x(n, dimX);
-    x.randn();
-    arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(n, arma::distr_param(0, dimK - 1));
     rnnLayer.modelGlorotInit();
     ceSoftmax.modelGlorotInit();
 
-    DataFeeder<T, int32_t> dataFeeder(x, yTrue, nullptr);
+    // baseline is uniform at random predictions (i.e. all with equal probability)
+    printf("Baseline loss: %f\n", log(dimK));
 
     SgdSolverBuilder<T> sb;
     sb.lr = 0.01;
@@ -180,7 +264,7 @@ void runSgd() {
     ConvergenceData last = convergence[convergence.size() - 1];
     assert(last.trainingLoss < 0.1 * log(dimK));
 
-    rnnsf = nullptr;  // do not delete
+    rnnsf = nullptr;  // do not delete rnnsf
     delete solver;
 }
 
@@ -189,6 +273,7 @@ int main(int argc, char** argv) {
     arma::arma_rng::set_seed(47);
     testLayer();
     testGradients();
+    // showRunningTime();
     runSgd<double>();
     std::cout << "Test " << __FILE__ << " passed" << std::endl;
 }

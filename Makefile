@@ -26,10 +26,8 @@ endif
 
 ifeq ($(UNAME_S), Darwin)
   CXX := clang++
-  CXX1XPICFLAGS := -fPIC
-  # CXXFLAGS := -Wall -mtune=core2 -g -O2
-  # CXXFLAGS := -Wall -g -O3
-  CXXFLAGS := -Wall -g -O0
+  # CXXFLAGS := -Wall -O3 -march=native
+  CXXFLAGS := -Wall -O0
   # location of "armadillo" include file
   INCLUDES := /usr/local/include
   # LIBS = -lgfortran -lblas -framework Accelerate
@@ -37,9 +35,7 @@ ifeq ($(UNAME_S), Darwin)
 endif
 ifeq ($(UNAME_S), Linux)
   CXX := g++
-  CXX1XPICFLAGS := -fpic
-  # CXXFLAGS := -g -O2 -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -g
-  # CXXFLAGS := -Wall -g -O3
+  # CXXFLAGS := -Wall -g -O3 -march=native
   CXXFLAGS := -Wall -g -O0
   # location of "armadillo" include file
   INCLUDES := /usr/local/include
@@ -52,13 +48,14 @@ ARMA_FLAGS := -DARMA_DONT_USE_WRAPPER
 # -DARMA_NO_DEBUG : disables Armadillo's checks
 
 CXX1XSTD := -std=c++11
-CXXFLAGS_FINAL := $(CXX1XSTD) $(CXX1XPICFLAGS) $(CXXFLAGS) $(ARMA_FLAGS)
+CXXFLAGS_FINAL := $(CXX1XSTD) $(CXXFLAGS) $(ARMA_FLAGS)
 
 CORE_SRC_HEADERS := activation.h ceSoftmaxLayer.h dataFeeder.h neuralBase.h neuralLayer.h \
 	nnAndData.h sgdSolver.h softmax.h
 TEST_HEADERS := gradientCheck.h util.h
 TEST_OBJS := gradientCheck.o
-TEST_EXECS := sgdSolverTest gradientCheckTest gruLayerTest neuralLayerTest neuralClassifierTest rnnLayerTest softmaxTest
+TEST_EXECS := gradientCheckTest gruLayerTest neuralLayerTest neuralClassifierTest \
+	rnnLayerTest sgdSolverTest softmaxTest
 
 all: $(TEST_EXECS) spamClassifier
 

@@ -6,20 +6,19 @@
 #include <cstdio>
 #include <sstream>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
 #include <armadillo>
 
 
-// If OWN_DATA_COPY is defined then DataFeeder creates its own internal copy of data.
-// This is mandatory when this code is used from within R.
-#define OWN_DATA_COPY
-
-
 /**
  * Encapsulates a data set and exposes retrieving contiguous parts of it of requested size.
  * Rewinds to the beginning if data set is exhausted.
+ *
+ * This class is not intended to be the most general data set abstraction but fulfills the following:
+ * The data set format supported is two-dimensional input and label matrices where each input
+ * observation has exactly one output observation. Observations can be indexed by row or column
+ * per client configuration.
  */
 template<typename T, typename U>
 class DataFeeder final {
@@ -27,14 +26,14 @@ public:
     /*
      * Passing a non-null outMsgStream_ results in very verbose debugging messages.
      */
-    DataFeeder(const arma::Mat<T> & x_, const arma::Col<U> & y_, std::ostream * outMsgStream_ = nullptr)
-        : x(x_), y(y_), batchX(), batchY(), batchPair(&batchX, &batchY),
+    DataFeeder(const arma::Mat<T> * x_, const arma::Mat<U> * y_, bool byRow_, std::ostream * outMsgStream_ = nullptr)
+        : x(x_), y(y_), batchX(), batchY(), batchPair(&batchX, &batchY), byRow(byRow_),
+          numPerEpoch(byRow_ ? x_->n_rows : x_->n_cols),
           index(0), numEpochs(0), outMsgStream(outMsgStream_) {
-        if (x.n_rows != y.n_rows) {
-            std::stringstream ss;
-            ss << "Number or rows [" << x.n_rows << "] in input matrix different than number of rows ["
-               << y.n_rows << "] in y column" << std::endl;
-            throw std::invalid_argument(ss.str());
+        if (y != nullptr && ((byRow && x->n_rows != y->n_rows) || (!byRow && x->n_cols != y->n_cols))) {
+            snprintf(msgBuf, sizeof(msgBuf), "For byRow=%d, Incompatible x shape: (%u %u), y shape (%u %u)",
+                    byRow, (unsigned)x->n_rows, (unsigned)x->n_cols, (unsigned)y->n_rows, (unsigned)y->n_cols);
+            throw std::invalid_argument(msgBuf);
         }
     }
 
@@ -54,17 +53,23 @@ public:
      * It returns less than numRequested if and only if the end of the data set it reached,
      * in which case it wraps around from the beginning at the next invocation.
      */
-    const std::pair<const arma::Mat<T> *, const arma::Col<U> *> & getNextN(uint32_t numRequested) {
-        uint32_t numActual = index + numRequested > x.n_rows ? x.n_rows - index : numRequested;
+    const std::pair<const arma::Mat<T> *, const arma::Mat<U> *> & getNextXY(uint32_t numRequested) {
+        const uint32_t numActual = index + numRequested > numPerEpoch ? numPerEpoch - index : numRequested;
         // note: it is important that the submatrix view is assigned to an object data member otherwise
-        // we would return from this function a reference to a temporary
-        batchX = x.submat(arma::span(index, index + numActual - 1), arma::span::all);
-        batchY = y.subvec(arma::span(index, index + numActual - 1));
+        // we would return from this function a reference to a function stack allocated object which
+        // would be bug
+        if (byRow) {
+            batchX = x->rows(index, index + numActual - 1);
+            batchY = y->rows(index, index + numActual - 1);
+        } else {
+            batchX = x->cols(index, index + numActual - 1);
+            batchY = y->cols(index, index + numActual - 1);
+        }
         if (outMsgStream != nullptr) {
             logToOutMsgStream("epoch=%d, index=%d, numActual=%d", numEpochs, index, numActual);
         }
         index += numActual;
-        if (index == x.n_rows) {
+        if (index == numPerEpoch) {
             index = 0;
             numEpochs++;
             if (outMsgStream != nullptr) {
@@ -74,104 +79,21 @@ public:
         return batchPair;
     }
 
-    // Advances to beginning of next epoch, if not already at the beginning of current epoch.
-    void advanceToNextEpochIf() {
-        if (index != x.n_rows) {
-            index = 0;
-            numEpochs++;
-            if (outMsgStream != nullptr) {
-                logToOutMsgStream("Request to advance to new epoch=%d", numEpochs);
-            }
+    const arma::Mat<T> & getNextX(uint32_t numRequested) {
+        const uint32_t numActual = index + numRequested > numPerEpoch ? numPerEpoch - index : numRequested;
+        // note: it is important that the submatrix view is assigned to an object data member otherwise
+        // we would return from this function a reference to a function stack allocated object which
+        // would be bug
+        if (byRow) {
+            batchX = x->rows(index, index + numActual - 1);
+        } else {
+            batchX = x->cols(index, index + numActual - 1);
         }
-    }
-
-    bool isAtEpochStart() const {
-        return index == 0;
-    }
-
-    uint32_t getItemsPerEpoch() const {
-        return x.n_rows;
-    }
-
-    unsigned int getDimX() const {
-        return x.n_cols;
-    }
-
-    const arma::Mat<T> & getX() const {
-        return x;
-    }
-
-    const arma::Col<U> & getLabels() const {
-        return y;
-    }
-
-    std::string toString() const {
-        snprintf(this->msgBuf, sizeof(this->msgBuf),
-                "n=%lu, current_index=%u, current_epoch=%u, x_raw_ptr=%p, y_raw_ptr=%p",
-                (unsigned long)x.n_rows, index, numEpochs, x.memptr(), y.memptr());
-        return std::string(this->msgBuf);
-    }
-
-private:
-    void logToOutMsgStream(const char *fmt, ...) {
-        va_list args;
-        va_start(args, fmt);
-        vsnprintf(this->msgBuf, sizeof(this->msgBuf), fmt, args);
-        va_end(args);
-        *outMsgStream << this->msgBuf << std::endl;
-    }
-
-#ifdef OWN_DATA_COPY
-    // we make copies of data when are used for R Rcpp
-    const arma::Mat<T> x;
-    const arma::Col<U> y;
-#else
-    const arma::Mat<T> & x;
-    const arma::Col<U> & y;
-#endif
-    arma::Mat<T> batchX;
-    arma::Col<U> batchY;
-    const std::pair<const arma::Mat<T> *, const arma::Col<U> *> batchPair;
-    uint32_t index;
-    uint32_t numEpochs;
-
-    char msgBuf[1024];
-    std::ostream * outMsgStream;
-};
-
-
-// TODO: Code duplication with DataFeeder. Needs to be refactored.
-template<typename T>
-class DataFeederNoY final {
-public:
-    DataFeederNoY(const arma::Mat<T> & x_, std::ostream * outMsgStream_ = nullptr)
-        : x(x_), batchX(), index(0), numEpochs(0), outMsgStream(outMsgStream_) {
-    }
-
-    ~DataFeederNoY() {
-        if (outMsgStream != nullptr) {
-            logToOutMsgStream("~DataFeederNoY object_ptr=%p", this);
-        }
-    }
-
-    DataFeederNoY(DataFeederNoY const &) = delete;
-    DataFeederNoY & operator=(DataFeederNoY const &) = delete;
-    DataFeederNoY(DataFeederNoY const &&) = delete;
-    DataFeederNoY & operator=(DataFeederNoY const &&) = delete;
-
-    const arma::Mat<T> & getNextN(uint32_t numRequested) {
-        if (outMsgStream != nullptr) {
-            logToOutMsgStream("index=%u, x.n_rows=%u, numRequested=%u", index, x.n_rows, numRequested);
-        }
-        uint32_t numActual = index + numRequested > x.n_rows ? x.n_rows - index : numRequested;
-        // it is important that the submatrix view is assigned to an object data member otherwise
-        // we would return from this function a reference to a temporary
-        batchX = x.submat(arma::span(index, index + numActual - 1), arma::span::all);
         if (outMsgStream != nullptr) {
             logToOutMsgStream("epoch=%d, index=%d, numActual=%d", numEpochs, index, numActual);
         }
         index += numActual;
-        if (index == x.n_rows) {
+        if (index == numPerEpoch) {
             index = 0;
             numEpochs++;
             if (outMsgStream != nullptr) {
@@ -181,22 +103,38 @@ public:
         return batchX;
     }
 
+    // Advances to beginning of next epoch, if not already at the beginning of current epoch.
+    void advanceToNextEpochIf() {
+        if (index != numPerEpoch) {
+            index = 0;
+            numEpochs++;
+            if (outMsgStream != nullptr) {
+                logToOutMsgStream("Request to advance to new epoch=%d", numEpochs);
+            }
+        }
+    }
+
+    inline bool indexedByRow() const {
+        return byRow;
+    }
+
     bool isAtEpochStart() const {
         return index == 0;
     }
 
     uint32_t getItemsPerEpoch() const {
-        return x.n_rows;
+        return numPerEpoch;
     }
 
-    const arma::Mat<T> & getX() const {
-        return x;
+    unsigned int getDimX() const {
+        return byRow ? x->n_cols : x->n_rows;
     }
 
     std::string toString() const {
-        snprintf(this->msgBuf, sizeof(this->msgBuf),
-                "n=%lu, current_index=%u, current_epoch=%u, x_raw_ptr=%p",
-                (unsigned long)x.n_rows, index, numEpochs, x.memptr());
+        snprintf(msgBuf, sizeof(msgBuf),
+                "n=%u, current_index=%u, current_epoch=%u, x_raw_ptr=%p, y_raw_ptr=%p",
+                (unsigned)numPerEpoch, index, numEpochs, x->memptr(),
+                y != nullptr? y->memptr() : nullptr);
         return std::string(this->msgBuf);
     }
 
@@ -209,13 +147,16 @@ private:
         *outMsgStream << this->msgBuf << std::endl;
     }
 
-#ifdef OWN_DATA_COPY
-    // we make copies of data when are used for R Rcpp
-    const arma::Mat<T> x;
-#else
-    const arma::Mat<T> & x;
-#endif
+    const arma::Mat<T> * x;
+    const arma::Mat<U> * y;
+
     arma::Mat<T> batchX;
+    arma::Mat<U> batchY;
+    const std::pair<const arma::Mat<T> *, const arma::Mat<U> *> batchPair;
+
+    const bool byRow;
+    const uint32_t numPerEpoch;
+
     uint32_t index;
     uint32_t numEpochs;
 

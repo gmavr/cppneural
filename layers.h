@@ -7,14 +7,18 @@
  * Frequently used network layers as building blocks.
  */
 
+
 /**
- * Squared error loss function top layer and arbitrary network as the bottom layer.
+ * 0.5 * squared error loss function top layer and as the bottom layer arbitrary network (as long
+ * as the derivative w.r. to inputs exists as a matrix).
+ * Agnostic as to whether observations are indexed by row or column.
  */
 template <typename T>
-class CEL2LossNN final : public LossNN<T, T> {
+class CEL2LossNN final : public LossNNwithInputGrad<T, T> {
 
 public:
-    CEL2LossNN(ComponentNN<T> & componentNN_) : LossNN<T, T>(componentNN_.getNumP()),
+    CEL2LossNN(ComponentNN<T, T> & componentNN_)
+        : LossNNwithInputGrad<T, T>(componentNN_.getNumP()),
         componentNN(componentNN_), loss(0.0), yTrue(nullptr), delta_err() { }
 
     arma::Mat<T> * forward(const arma::Mat<T> & input) override {
@@ -31,23 +35,25 @@ public:
     }
 
     inline const arma::Mat<T> * getTrueOutput() const override {
-        return this->yTrue;
+        return yTrue;
     }
 
     double computeLoss() override {
-        // delta_err is the derivative of loss w.r. to the input of this layer
-    	delta_err = componentNN.getOutput() - *(this->yTrue);
+    	delta_err = componentNN.getOutput() - *yTrue;
         loss = 0.5 * arma::accu(arma::square(delta_err));  // element-wise squaring, then summation
         return loss;
     }
 
     arma::Mat<T> * backwards() override {
-        this->inputGrad = *(componentNN.backwards(delta_err));
-        return &this->inputGrad;
+        return componentNN.backwards(delta_err);
     }
 
     const arma::Mat<T> * getInputToTopLossLayer() const override {
         return &componentNN.getOutput();
+    }
+
+    arma::Mat<T> * getInputGradient() override {
+        return componentNN.getInputGradient();
     }
 
     uint32_t getDimX() const override {
@@ -55,7 +61,7 @@ public:
     }
 
 private:
-    ComponentNN<T> & componentNN;
+    ComponentNN<T, T> & componentNN;
     double loss;
     const arma::Mat<T> * yTrue;  // not owned by this object
     arma::Mat<T> delta_err;
@@ -71,16 +77,17 @@ private:
 
 
 /**
- * Very simple loss function:
+ * Simple loss layer, mostly for testing.
  * loss = sum_x [ W x + b ] with W matrix of shape 1xD, b scalar, x of shape D or NxD
+ * Observations are indexed by row.
  */
 template <typename T>
-class ProjectionSumLoss final : public SkeletalLossNN<T, T> {
+class ProjectionSumLoss final : public ComponentLossNN<T, T> {
 
     // y = sum_x [ w x + b ] with y scalar, w row vector 1xD, b scalar, x of shape D or batched NxD
 
 public:
-    ProjectionSumLoss(uint32_t dimX_) : SkeletalLossNN<T, T>(dimX_ + 1), dimX(dimX_),
+    ProjectionSumLoss(uint32_t dimX_) : ComponentLossNN<T, T>(dimX_ + 1), dimX(dimX_),
         w(nullptr), dw(nullptr), b(nullptr), db(nullptr) {
     }
 
@@ -106,7 +113,6 @@ public:
     }
 
     arma::Mat<T> * backwards() override {
-        // only needed for syntactic reasons, compiler does not resolve template properly
         const arma::Mat<T> & mat1 = *(this->x);
         *dw = arma::sum(mat1, 0);
         (*db)[0] = this->x->n_rows;
@@ -141,27 +147,25 @@ private:
     arma::Col<T> * b;
     arma::Col<T> * db;
 
-    std::pair<arma::Row<T> *, arma::Col<T> *> unpackModelOrGrad(arma::Row<T> * params) {
+    void unpackModelOrGrad(arma::Row<T> * params, arma::Row<T> ** wPtr, arma::Col<T> ** bPtr) {
         if (params->n_elem != this->numP) {
             throw std::invalid_argument("Illegal length of passed vector");
         }
+        if ((wPtr == nullptr || *wPtr != nullptr) || (bPtr == nullptr || *bPtr != nullptr)) {
+            throw std::invalid_argument("Bad pointers");
+        }
         T * rawPtr = params->memptr();
-        arma::Row<T> * w_ = newRowFixedSizeExternalMemory<T>(rawPtr, dimX);
+        *wPtr = newRowFixedSizeExternalMemory<T>(rawPtr, dimX);
         rawPtr += dimX;
-        arma::Col<T> * d_ = newColFixedSizeExternalMemory<T>(rawPtr, 1);
-        return std::pair<arma::Row<T> *, arma::Col<T> *>(w_, d_);
+        *bPtr = newColFixedSizeExternalMemory<T>(rawPtr, 1);
     }
 
     void setModelReferencesInPlace() override {
-        auto ret = unpackModelOrGrad(this->getModel());
-        w = ret.first;
-        b = ret.second;
+        unpackModelOrGrad(this->getModel(), &w, &b);
     }
 
     void setGradientReferencesInPlace() override {
-        auto ret = unpackModelOrGrad(this->getModelGradient());
-        dw = ret.first;
-        db = ret.second;
+        unpackModelOrGrad(this->getModelGradient(), &dw, &db);
     }
 };
 
@@ -169,15 +173,19 @@ private:
 /**
  * A neural network consisting of an arbitrary top scalar loss layer and an arbitrary lower layer.
  * Both layers are abstractions and can consist of their own internal layers.
+ * (The derivative w.r. to inputs to lower layer must exist as a matrix.)
  *
  * This is a useful utility class for wiring two such networks together easily.
+ *
+ * Agnostic as to whether observations are indexed by row or column. But the enclosed components
+ * have to be consistent in that indexing.
  */
-template<typename T, typename U>
-class ComponentAndLoss : public LossNN<T, U> {
+template<typename T, typename TY>
+class ComponentAndLoss : public LossNNwithInputGrad<T, TY> {
 
 public:
-    ComponentAndLoss(ComponentNN<T> & componentLayer, LossNN<T, U> & lossNN)
-        : LossNN<T, U>(componentLayer.getNumP() + lossNN.getNumP()),
+    ComponentAndLoss(ComponentNN<T, T> & componentLayer, LossNNwithInputGrad<T, TY> & lossNN)
+        : LossNNwithInputGrad<T, TY>(componentLayer.getNumP() + lossNN.getNumP()),
         lowerLayer(componentLayer), topLayer(lossNN),
         modelLower(nullptr), modelTop(nullptr),
         gradientLower(nullptr), gradientTop(nullptr) { }
@@ -201,11 +209,10 @@ public:
 
     inline arma::Mat<T> * backwards() override {
         arma::Mat<T> * deltaErr = topLayer.backwards();
-        this->inputGrad = *(lowerLayer.backwards(*deltaErr));
-        return &this->inputGrad;
+        return lowerLayer.backwards(*deltaErr);
     }
 
-    virtual void setTrueOutput(const arma::Mat<U> & outputTrue) override {
+    virtual void setTrueOutput(const arma::Mat<TY> & outputTrue) override {
         topLayer.setTrueOutput(outputTrue);
     }
 
@@ -213,12 +220,16 @@ public:
         return topLayer.getLoss();
     }
 
-    virtual const arma::Mat<U> * getTrueOutput() const override {
+    virtual const arma::Mat<TY> * getTrueOutput() const override {
         return topLayer.getTrueOutput();
     }
 
     virtual uint32_t getDimX() const override {
         return lowerLayer.getDimX();
+    }
+
+    virtual arma::Mat<T> * getInputGradient() override {
+        return lowerLayer.getInputGradient();
     }
 
 private:
@@ -253,8 +264,8 @@ private:
         topLayer.setGradientStorage(gradientTop);
     }
 
-    ComponentNN<T> & lowerLayer;
-    LossNN<T, U> & topLayer;
+    ComponentNN<T, T> & lowerLayer;
+    LossNNwithInputGrad<T, TY> & topLayer;
 
     arma::Row<T> * modelLower, * modelTop;
     arma::Row<T> * gradientLower, * gradientTop;
@@ -265,34 +276,25 @@ private:
  * Extension of ComponentAndLoss for models that have an initial hidden state, most commonly coming
  * from previous batch, such as RNNs.
  */
-template<typename T, typename U>
-class ComponentAndLossWithMemory final : public ComponentAndLoss<T, U> {
+template<typename T, typename TY>
+class ComponentAndLossWithMemory final : public ComponentAndLoss<T, TY> {
 public:
-    ComponentAndLossWithMemory(ComponentNNwithMemory<T> & componentLayer, LossNN<T, U> & lossNN)
-        : ComponentAndLoss<T, U>(componentLayer, lossNN), lowerLayerWithMemory(componentLayer) { }
+    ComponentAndLossWithMemory(ComponentNNwithMemory<T, T> & componentLayer,
+            LossNNwithInputGrad<T, TY> & lossNN)
+        : ComponentAndLoss<T, TY>(componentLayer, lossNN), lowerLayerWithMemory(componentLayer) { }
 
     virtual ~ComponentAndLossWithMemory() { }
 
-    void resetInitialHiddenState() {
+    void resetInitialHiddenState() override {
         lowerLayerWithMemory.resetInitialHiddenState();
     }
 
-    void setInitialHiddenState(const arma::Row<T> & initialState) {
+    void setInitialHiddenState(const arma::Row<T> & initialState) override {
         lowerLayerWithMemory.setInitialHiddenState(initialState);
     }
 
-    virtual std::pair<double, arma::Row<T> *> forwardBackwardsGradModel(const arma::Row<T> * optionalArgs) override {
-        lowerLayerWithMemory.setInitialHiddenState(*optionalArgs);
-        return LossNN<T, U>::forwardBackwardsGradModel();
-    }
-
-    virtual std::pair<double, arma::Mat<T> *> forwardBackwardsGradInput(const arma::Row<T> * optionalArgs) override {
-        lowerLayerWithMemory.setInitialHiddenState(*optionalArgs);
-        return LossNN<T, U>::forwardBackwardsGradInput();
-    }
-
 private:
-    ComponentNNwithMemory<T> & lowerLayerWithMemory;
+    ComponentNNwithMemory<T, T> & lowerLayerWithMemory;
 };
 
 #endif  // _LAYERS_H_

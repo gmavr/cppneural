@@ -5,13 +5,18 @@
 #include "softmax.h"
 
 
-template <typename T, typename U>
-class CESoftmaxNN final : public SkeletalLossNN<T, U> {
+/**
+ * Softmax Layer where the second dimension of the input matrix indexes the observations.
+ * More efficient than first dimension for larger matrices and the default implementation.
+ */
+template <typename T, typename TY>
+class CESoftmaxNN final : public ComponentLossNN<T, TY> {
 
 public:
-    CESoftmaxNN(uint32_t dimX_, uint32_t dimK_) : SkeletalLossNN<T, U>(dimK_ * dimX_ + dimK_),
-        dimX(dimX_), dimK(dimK_),
-        w(nullptr), dw(nullptr), b(nullptr), db(nullptr) {
+    CESoftmaxNN(uint32_t dimX_, uint32_t dimK_, bool assertsOn_ = true)
+        : ComponentLossNN<T,TY>(dimK_ * dimX_ + dimK_),
+        dimX(dimX_), dimK(dimK_), pOfTrue(),
+        w(nullptr), dw(nullptr), b(nullptr), db(nullptr), assertsOn(assertsOn_) {
     }
 
     ~CESoftmaxNN() {
@@ -35,14 +40,171 @@ public:
     }
 
     // avoid having to fully-qualify y, yTrue due to templates and inheritance
-    using SkeletalLossNN<T, U>::y;
-    using SkeletalLossNN<T, U>::yTrue;
+    using ComponentLossNN<T, TY>::y;
+    using ComponentLossNN<T, TY>::yTrue;
 
     // Returns pointer to internal memory holding the probabilities of each class.
     // The contents of the returned memory will be changed at the next invocation of
     // either backwards() or forward(). Client code should make a copy if needed.
     arma::Mat<T> * forward(const arma::Mat<T> & input) override {
-        if (input.n_cols != dimX) {
+        if (input.n_rows != dimX) {
+            throw std::invalid_argument("Illegal row size for input: " + std::to_string(input.n_rows));
+        }
+        this->x = &input;
+
+         // (K, D) x (D, N) = (K, N)
+        y = (*w) * input;
+        y.each_col() += (*b);
+        y = softmaxByColumn(y);
+
+        return &y;
+    }
+
+    double computeLoss() override {
+        if (assertsOn && (yTrue->n_rows != 1 || yTrue->n_cols != y.n_cols || y.n_rows != dimK)) {
+            throw std::invalid_argument("yTrue must be of shape (1, N)");
+        }
+
+        pOfTrue.set_size(yTrue->n_cols);
+
+        if (assertsOn) {
+            for (arma::uword i = 0; i < y.n_cols; i++) {
+                pOfTrue(i) = y((*yTrue)(0, i), i);
+            }
+        } else {
+            for (arma::uword i = 0; i < y.n_cols; i++) {
+                pOfTrue.at(i) = y.at((*yTrue).at(0, i), i);
+            }
+        }
+
+        this->loss = - arma::sum(arma::log(pOfTrue));
+        return this->loss;
+    }
+
+    arma::Mat<T> * backwards() override {
+        if (assertsOn && (yTrue->n_rows != 1 || yTrue->n_cols != y.n_cols || y.n_rows != dimK)) {
+            throw std::invalid_argument("yTrue must be of shape (1, N): ");
+        }
+
+        // y is modified in-place to be equal to softmax derivative w.r. to softmax inputs
+        // for readability name it deltaS
+        arma::Mat<T> & deltaS = y;
+
+        if (assertsOn) {
+            for (arma::uword i = 0; i < y.n_cols; i++) {
+                deltaS((*yTrue)(0, i), i) -= 1.0;
+            }
+        } else {
+            for (arma::uword i = 0; i < y.n_cols; i++) {
+                deltaS.at((*yTrue).at(0, i), i) -= 1.0;
+            }
+        }
+
+        // (K, D) = (K, N) x (N, D) is the sum over the N samples of (K, 1) x (1, D)
+        *dw = deltaS * this->x->t();
+        *db = arma::sum(deltaS, 1); // (K, N) reduced to (K, 1)
+
+        // (D, K) x (K, N) = (D, N)
+        this->inputGrad = w->t() * deltaS;
+        return &this->inputGrad;
+    }
+
+    const arma::Mat<T> * getInputToTopLossLayer() const override {
+        return &y;
+    }
+
+    uint32_t getDimX() const override {
+        return dimX;
+    }
+
+    uint32_t getDimK() const {
+        return dimK;
+    }
+
+    inline static uint32_t getStaticNumP(uint32_t dimX, uint32_t dimK) {
+        return dimK * dimX + dimK;
+    }
+
+private:
+    const uint32_t dimX, dimK;
+    arma::Row<T> pOfTrue;
+
+    // dimK x DimX
+    arma::Mat<T> * w;
+    arma::Mat<T> * dw;
+
+    // dimK x 1
+    arma::Col<T> * b;
+    arma::Col<T> * db;
+
+    const bool assertsOn;
+
+    void unpackModelOrGrad(arma::Row<T> * params,arma::Mat<T> ** wPtr, arma::Col<T> ** bPtr) {
+        if (params->n_elem != this->numP) {
+            throw std::invalid_argument("Illegal length of passed vector");
+        }
+        if ((wPtr == nullptr || *wPtr != nullptr) || (bPtr == nullptr || *bPtr != nullptr)) {
+            throw std::invalid_argument("Bad pointers");
+        }
+        T * rawPtr = params->memptr();
+        *wPtr = newMatFixedSizeExternalMemory<T>(rawPtr, dimK, dimX);
+        rawPtr += dimX * dimK;
+        *bPtr = newColFixedSizeExternalMemory<T>(rawPtr, dimK);
+    }
+
+    void setModelReferencesInPlace() override {
+        unpackModelOrGrad(this->getModel(), &w, &b);
+    }
+
+    void setGradientReferencesInPlace() override {
+        unpackModelOrGrad(this->getModelGradient(), &dw, &db);
+    }
+};
+
+
+/**
+ * Softmax Layer where the first dimension of the input matrix indexes the observations.
+ * Less efficient than first dimension for larger matrices.
+ */
+template <typename T, typename TY>
+class CESoftmaxNNbyRow final : public ComponentLossNN<T, TY> {
+
+public:
+    CESoftmaxNNbyRow(uint32_t dimX_, uint32_t dimK_, bool assertsOn_ = true)
+        : ComponentLossNN<T, TY>(dimK_ * dimX_ + dimK_),
+        dimX(dimX_), dimK(dimK_), pOfTrue(),
+        w(nullptr), dw(nullptr), b(nullptr), db(nullptr), assertsOn(assertsOn_) {
+    }
+
+    ~CESoftmaxNNbyRow() {
+        delete w;
+        delete dw;
+        delete b;
+        delete db;
+    }
+
+    void modelGlorotInit() {
+        b->zeros();
+        glorotInit(*w);
+    }
+
+    void modelNormalInit(double sd = 1.0) {
+        b->zeros();
+        w->randn();
+        if (sd != 1.0) {
+            *w *= sd;
+        }
+    }
+
+    // avoid having to fully-qualify y, yTrue due to templates and inheritance
+    using ComponentLossNN<T, TY>::y;
+    using ComponentLossNN<T, TY>::yTrue;
+
+    // Returns pointer to internal memory holding the probabilities of each class.
+    // The contents of the returned memory will be changed at the next invocation of
+    // either backwards() or forward(). Client code should make a copy if needed.
+    arma::Mat<T> * forward(const arma::Mat<T> & input) override {
+        if (assertsOn && input.n_cols != dimX) {
             throw std::invalid_argument("Illegal column size for input: " + std::to_string(input.n_cols));
         }
         this->x = &input;
@@ -53,21 +215,26 @@ public:
          */
         y = input * (*w);
         y.each_row() += (*b);
-        y = softmax(y);
+        y = softmaxByRow(y);
 
         return &y;
     }
 
     double computeLoss() override {
-        if (yTrue->n_rows != y.n_rows || yTrue->n_cols != 1 || y.n_cols != dimK) {
+        if (assertsOn && (yTrue->n_rows != y.n_rows || yTrue->n_cols != 1 || y.n_cols != dimK)) {
             throw std::invalid_argument("yTrue must be of shape (N, 1): ");
         }
 
-        arma::Col<T> pOfTrue(yTrue->n_rows);
+        pOfTrue.set_size(yTrue->n_rows);
 
-        for (unsigned int i = 0; i < y.n_rows; i++) {
-            pOfTrue(i) = y(i, (*yTrue)(i, 0));
-            // this->loss += arma::log(y(i, (*yTrue)(0, i)));
+        if (assertsOn) {
+            for (arma::uword i = 0; i < y.n_rows; i++) {
+                pOfTrue(i) = y(i, (*yTrue)(i, 0));
+            }
+        } else {
+            for (arma::uword i = 0; i < y.n_rows; i++) {
+                pOfTrue.at(i) = y.at(i, (*yTrue).at(i, 0));
+            }
         }
 
         this->loss = - arma::sum(arma::log(pOfTrue));
@@ -75,21 +242,29 @@ public:
     }
 
     arma::Mat<T> * backwards() override {
-        // y(arma::span::all, arma::span(yTrue->row(0))) -= 1;
-        // y.submat(arma::span::all, yTrue->row(0)) -= 1;
-        for (unsigned int i = 0; i < y.n_rows; i++) {
-            y(i, (*yTrue)(i, 0)) -= 1.0;
+        if (assertsOn && (yTrue->n_rows != y.n_rows || yTrue->n_cols != 1 || y.n_cols != dimK)) {
+            throw std::invalid_argument("yTrue must be of shape (N, 1)");
         }
 
-        // modified in-place to be equal to softmax derivative w.r. to softmax inputs
+        // y is modified in-place to be equal to softmax derivative w.r. to softmax inputs
         // for readability name it deltaS
-        const arma::Mat<T> & deltaS = y;
+        arma::Mat<T> & deltaS = y;
+
+        if (assertsOn) {
+            for (arma::uword i = 0; i < deltaS.n_rows; i++) {
+                deltaS(i, (*yTrue)(i, 0)) -= 1.0;
+            }
+        } else {
+            for (arma::uword i = 0; i < deltaS.n_rows; i++) {
+                deltaS.at(i, (*yTrue).at(i, 0)) -= 1.0;
+            }
+        }
 
         // (D, N) x (N, K) = (D, K) is the sum over the N samples of (K, 1) x (1, D)
         *dw = this->x->t() * deltaS;
         *db = arma::sum(deltaS, 0); // (N, K) reduced to (1, K)
 
-        // (N, K) x (K, D) -> (N, D)
+        // (N, K) x (K, D) = (N, D)
         this->inputGrad = deltaS * w->t();
         return &this->inputGrad;
     }
@@ -112,6 +287,7 @@ public:
 
 private:
     const uint32_t dimX, dimK;
+    arma::Col<T> pOfTrue;
 
     // dimX x DimK
     arma::Mat<T> * w;
@@ -121,27 +297,27 @@ private:
     arma::Row<T> * b;
     arma::Row<T> * db;
 
-    std::pair<arma::Mat<T> *, arma::Row<T> *> unpackModelOrGrad(arma::Row<T> * params) {
+    const bool assertsOn;
+
+    void unpackModelOrGrad(arma::Row<T> * params,arma::Mat<T> ** wPtr, arma::Row<T> ** bPtr) {
         if (params->n_elem != this->numP) {
-            throw std::invalid_argument("Illegal length of passed vector" + std::to_string(params->n_elem));
+            throw std::invalid_argument("Illegal length of passed vector");
+        }
+        if ((wPtr == nullptr || *wPtr != nullptr) || (bPtr == nullptr || *bPtr != nullptr)) {
+            throw std::invalid_argument("Bad pointers");
         }
         T * rawPtr = params->memptr();
-        arma::Mat<T> * w_ = newMatFixedSizeExternalMemory<T>(rawPtr, dimX, dimK);
+        *wPtr = newMatFixedSizeExternalMemory<T>(rawPtr, dimX, dimK);
         rawPtr += dimX * dimK;
-        arma::Row<T> * d_ = newRowFixedSizeExternalMemory<T>(rawPtr, dimK);
-        return std::pair<arma::Mat<T> *, arma::Row<T> *>(w_, d_);
+        *bPtr = newRowFixedSizeExternalMemory<T>(rawPtr, dimK);
     }
 
     void setModelReferencesInPlace() override {
-        auto ret = unpackModelOrGrad(this->getModel());
-        w = ret.first;
-        b = ret.second;
+        unpackModelOrGrad(this->getModel(), &w, &b);
     }
 
     void setGradientReferencesInPlace() override {
-        auto ret = unpackModelOrGrad(this->getModelGradient());
-        dw = ret.first;
-        db = ret.second;
+        unpackModelOrGrad(this->getModelGradient(), &dw, &db);
     }
 };
 

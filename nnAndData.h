@@ -36,11 +36,11 @@ public:
 };
 
 
-template <typename T, typename U>
+template <typename TX, typename T, typename TY>
 class LossNNAndDataFunctor final : public ModelFunctor<T> {
 public:
-    LossNNAndDataFunctor(LossNN<T, U> & lossNN_, DataFeeder<T, U> & dataFeeder_, uint32_t batchSize_,
-            std::ostream * outMsgStream_ = nullptr)
+    LossNNAndDataFunctor(LossNN<arma::Mat<TX>, T, TY> & lossNN_, DataFeeder<TX, TY> & dataFeeder_,
+            uint32_t batchSize_, std::ostream * outMsgStream_ = nullptr)
         : ModelFunctor<T>(), lossNN(lossNN_), dataFeeder(dataFeeder_), batchSize(batchSize_),
           outMsgStream(outMsgStream_) {  }
 
@@ -55,8 +55,8 @@ public:
      * update purposes.
      */
     std::pair<double, arma::Row<T> *> operator()() override {
-        std::pair<const arma::Mat<T> *, const arma::Col<U> *> p = dataFeeder.getNextN(batchSize);
-        uint32_t numRead = p.first->n_rows;
+        std::pair<const arma::Mat<TX> *, const arma::Mat<TY> *> p = dataFeeder.getNextXY(batchSize);
+        uint32_t numRead = dataFeeder.indexedByRow() ? p.first->n_rows : p.first->n_cols;
         lossNN.forwardBackwards(*p.first, *p.second);
         double loss = lossNN.getLoss() / numRead;
         arma::Row<T> * gradient = lossNN.getModelGradient();
@@ -74,8 +74,8 @@ public:
      * In that case: It processes only that many items in the last batch which is then not full.
      */
     std::pair<double, const arma::Mat<T> *> forwardOnlyWithLoss() {
-        std::pair<const arma::Mat<T> *, const arma::Col<U> *> p = dataFeeder.getNextN(batchSize);
-        uint32_t numRead = p.first->n_rows;
+        std::pair<const arma::Mat<TX> *, const arma::Mat<TY> *> p = dataFeeder.getNextXY(batchSize);
+        uint32_t numRead = dataFeeder.indexedByRow() ? p.first->n_rows : p.first->n_cols;
         double loss = lossNN.forwardWithLoss(*p.first, *p.second) / (double)numRead;
         const arma::Mat<T> * inputsToLossLayer = lossNN.getInputToTopLossLayer();
         return std::pair<double, const arma::Mat<T> *>(loss, inputsToLossLayer);
@@ -92,7 +92,7 @@ public:
         while (numItemsRead < numItems) {
             std::pair<double, const arma::Mat<T> *> p = forwardOnlyWithLoss();
             double thisBatchLoss = p.first;
-            uint32_t thisBatchSize = p.second->n_rows;
+            uint32_t thisBatchSize = dataFeeder.indexedByRow() ? p.second->n_rows : p.second->n_cols;
             runningMeanLoss = (numItemsRead * runningMeanLoss + thisBatchSize * thisBatchLoss)
                     / (double)(numItemsRead + thisBatchSize);
             numItemsRead += thisBatchSize;
@@ -135,8 +135,8 @@ public:
     }
 
 private:
-    LossNN<T, U> & lossNN;
-    DataFeeder<T, U> & dataFeeder;
+    LossNN<arma::Mat<TX>, T, TY> & lossNN;
+    DataFeeder<TX, TY> & dataFeeder;
     const uint32_t batchSize;
 
     std::ostream * outMsgStream;

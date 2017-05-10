@@ -8,38 +8,27 @@
 
 bool testProjectionSumLoss() {
     const int dimX = 5;
-    const int numP = dimX + 1;
     const int n = 1;
     const double tolerance = 1e-9;
 
-    arma::Mat<double> x = arma::Mat<double>(n, dimX);
-    x.randn();
-    arma::Mat<double> yTrue = arma::Mat<double>(n, 1);
-    yTrue.randn();
+    arma::Mat<double> x = arma::randn<arma::Mat<double>>(n, dimX);
+    // yTrue is ignored in the ProjectionSumLoss object
+    const arma::Mat<double> yTrue = arma::randn<arma::Mat<double>>(n, 1);
 
-    ModelMemoryManager<double> mm(numP);
-    double * modelBuffer = mm.modelBuffer;
-    double * gradientBuffer = mm.gradientBuffer;
+    ProjectionSumLoss<double> *lossNN = new ProjectionSumLoss<double>(dimX);
+    NNMemoryManager<double> lossNNmanager(lossNN);
 
-    arma::Row<double> modelVec = arma::Row<double>(modelBuffer, numP, false, true);
-    modelVec.randn();
-    arma::Row<double> gradientVec = arma::Row<double>(gradientBuffer, numP, false, true);
-
-    ProjectionSumLoss<double> lossNN(dimX);
-    lossNN.initParamsStorage(&modelVec, &gradientVec);
-
-    lossNN.forward(x);
-    lossNN.setTrueOutput(yTrue);  // ignored in this loss object
+    lossNN->getModel()->randn();
 
     bool gradientCheckSucces;
 
-    ModelGradientNNFunctor<double, double> mgf(lossNN);
-    gradientCheckSucces = gradientCheckModelDouble(mgf, *(lossNN.getModel()), tolerance, false);
+    ModelGradientNNFunctor<arma::Mat<double>, double, double> mgf(*lossNN, x, yTrue);
+    gradientCheckSucces = gradientCheckModelDouble(mgf, *(lossNN->getModel()), tolerance, false);
     if (!gradientCheckSucces) {
         return false;
     }
 
-    InputGradientNNFunctor<double, double> igf(lossNN);
+    InputGradientNNFunctor<double, double> igf(*lossNN, x, yTrue);
     gradientCheckSucces = gradientCheckInputDouble(igf, x, tolerance, false);
     if (!gradientCheckSucces) {
         return false;
@@ -51,39 +40,27 @@ bool testProjectionSumLoss() {
 
 bool testNeuralL2Loss() {
     const int dimX = 10, dimY = 15;
-    const int numP = dimX * dimY + dimY;
     const int n = 20;
     const double tolerance = 1e-8;
 
-    arma::Mat<double> x = arma::Mat<double>(n, dimX);
-    x.randn();
-    arma::Mat<double> yTrue = arma::Mat<double>(n, dimY);
-    yTrue.randn();
-
-    ModelMemoryManager<double> mm(numP);
-    double * modelBuffer = mm.modelBuffer;
-    double * gradientBuffer = mm.gradientBuffer;
-
-    arma::Row<double> modelVec = arma::Row<double>(modelBuffer, numP, false, true);
-    modelVec.randn();
-    arma::Row<double> gradientVec = arma::Row<double>(gradientBuffer, numP, false, true);
+    arma::Mat<double> x = arma::randn<arma::Mat<double>>(dimX, n);
+    const arma::Mat<double> yTrue = arma::randn<arma::Mat<double>>(dimY, n);
 
     NeuralLayer<double> nl(dimX, dimY, "logistic");
-    CEL2LossNN<double> lossNN(nl);
-    lossNN.initParamsStorage(&modelVec, &gradientVec);
+    CEL2LossNN<double> *lossNN = new CEL2LossNN<double>(nl);
+    NNMemoryManager<double> lossNNmanager(lossNN);
 
-    lossNN.forward(x);
-    lossNN.setTrueOutput(yTrue);
+    lossNN->getModel()->randn();
 
     bool gradientCheckSucces;
 
-    ModelGradientNNFunctor<double, double> mgf(lossNN);
-    gradientCheckSucces = gradientCheckModelDouble(mgf, *(lossNN.getModel()), tolerance, false);
+    ModelGradientNNFunctor<arma::Mat<double>, double, double> mgf(*lossNN, x, yTrue);
+    gradientCheckSucces = gradientCheckModelDouble(mgf, *(lossNN->getModel()), tolerance, false);
     if (!gradientCheckSucces) {
         return false;
     }
 
-    InputGradientNNFunctor<double, double> igf(lossNN);
+    InputGradientNNFunctor<double, double> igf(*lossNN, x, yTrue);
     gradientCheckSucces = gradientCheckInputDouble(igf, x, tolerance, false);
     if (!gradientCheckSucces) {
         return false;
@@ -94,6 +71,8 @@ bool testNeuralL2Loss() {
 
 
 int main(int argc, char** argv) {
+    arma::arma_rng::set_seed(47);
+
     bool gradientCheckSucces;
 
     gradientCheckSucces = testProjectionSumLoss();

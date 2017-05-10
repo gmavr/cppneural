@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cmath>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 #include <armadillo>
@@ -15,9 +16,13 @@
 
 // Methods for ensuring no accidental wrong-use of Armadillo memory ownership arguments.
 
-/*
+/**
  * Create row vector using foreign memory buffer, without copying that buffer
  * and with fixed-size for the Row object lifetime.
+ * @param buffer memory buffer to encapsulate
+ * @param bufferLength buffer length
+ * @return arma::Row allocated on the heap, backed up by the foreign buffer for the lifetime
+ *  of the returned object
  */
 template <typename T>
 arma::Row<T> * newRowFixedSizeExternalMemory(T * buffer, const arma::uword bufferLength) {
@@ -50,17 +55,17 @@ arma::Mat<T> * newMatFixedSizeExternalMemory(T * buffer,
  * Enforces memory space for:
  * 1) this layer's parameters (model)
  * 2) gradient of loss function w. r. to the parameters of this layer
- * 3) gradient of loss function w. r. to the inputs to this layer
  * Inline documentation defines memory ownership.
  */
 template <typename T>
 class CoreNN {
 
+    static_assert(std::is_floating_point<T>::value, "T must be floating point type");
+
 public:
     CoreNN(uint32_t numParameters)
         : modelStorageSet(false), model(nullptr),
           modelGradientStorageSet(false), modelGrad(nullptr),
-          inputGrad(), x(nullptr),
           numP(numParameters) {
     }
 
@@ -74,24 +79,19 @@ public:
     CoreNN(CoreNN const &&) = delete;
     CoreNN & operator=(CoreNN const &&) = delete;
 
-    /*
-     * Return dimensionality of model and gradient.
+    /**
+     * @return dimensionality of model and gradient.
      */
     inline uint32_t getNumP() const {
         return numP;
     }
-
-    /*
-     * Return dimensionality of input to this layer (for a single observation).
-     */
-    virtual uint32_t getDimX() const = 0;
 
     void initParamsStorage(arma::Row<T> * modelVector, arma::Row<T> * gradientVector) {
         setModelStorage(modelVector);
         setGradientStorage(gradientVector);
     }
 
-    /*
+    /**
      * Create private reference to the memory buffer inside the passed Row object.
      * Passed Row object is required to own the memory and be of fixed-size for object lifetime.
      * Makes no memory copy.
@@ -108,7 +108,7 @@ public:
         setModelReferencesInPlace();
     }
 
-    /*
+    /**
      * Create private reference to the memory buffer inside the passed Row object.
      * Passed Row object is required to own the memory and be of fixed-size for object lifetime.
      * Makes no memory copy.
@@ -125,8 +125,8 @@ public:
         setGradientReferencesInPlace();
     }
 
-    /*
-     * Return pointer to the model parameters.
+    /**
+     * @return pointer to the model parameters.
      * Returned pointed object owned by this object, caller may not delete it.
      */
     inline arma::Row<T> * getModel() {
@@ -134,8 +134,8 @@ public:
         return model;
     }
 
-    /*
-     * Return pointer to the model gradient.
+    /**
+     * @return pointer to the model gradient.
      * Returned pointed object owned by this object, caller may not delete it.
      */
     inline arma::Row<T> * getModelGradient() {
@@ -143,18 +143,6 @@ public:
             throw std::logic_error("Attempt to getModelGradient() when storage not set");
         }
         return modelGrad;
-    }
-
-    /*
-     * Return pointer to the gradient w.r. to inputs.
-     * Returned pointed object and enclosed memory owned by this object, caller may not delete it.
-     */
-    inline arma::Mat<T> * getInputGradient() {
-        return &inputGrad;
-    }
-
-    inline const arma::Mat<T> * getInput() const {
-        return this->x;
     }
 
     inline bool isModelStorageSet() const {
@@ -173,13 +161,13 @@ protected:
     }
 
 private:
-    /*
+    /**
      * Recursively set up enclosed component model memory references to appropriate locations
      * inside this object's model buffer.
      */
     virtual void setModelReferencesInPlace() = 0;
 
-    /*
+    /**
      * Recursively set up enclosed component model gradient memory references to appropriate
      * locations inside this object's model buffer.
      */
@@ -207,23 +195,24 @@ private:
     arma::Row<T> * modelGrad;
 
 protected:
-    arma::Mat<T> inputGrad;  // underlying buffer managed by inputGrad itself
-    const arma::Mat<T> * x;  // not owned by this object
     const uint32_t numP;
 };
 
 
 /**
- * Neural Network where the top layer is not a scalar loss function.
+ * Neural Network layer or collection of layers, where the top layer is a matrix
+ * (not a scalar loss function) and the input to the bottom layer is a matrix.
+ * The parallel to this class when the top layer is a scalar function is {@link ComponentLossNN}
  *
  * Adds forward and backward propagation methods.
+ * Adds input reference and gradient of loss function w. r. to the input to this layer.
  * Adds forward output storage.
  */
-template <typename T>
+template <typename TX, typename T>
 class ComponentNN : public CoreNN<T> {
 
 public:
-    ComponentNN(uint32_t numP_) : CoreNN<T>(numP_), y()  { }
+    ComponentNN(uint32_t numP_) : CoreNN<T>(numP_), inputGrad(), x(nullptr), y()  { }
 
     virtual ~ComponentNN() { }
 
@@ -238,39 +227,61 @@ public:
      * Usually first dimension indices the observations and second dimension is the observation
      * dimensionality.
      * Makes no copy of passed input matrix.
-     * Method must populate this->y.
+     * Implementation must populate this->y.
      * Returns pointer to this->y owned by this object.
      */
-    virtual arma::Mat<T> * forward(const arma::Mat<T> & input) = 0;
+    virtual arma::Mat<T> * forward(const arma::Mat<TX> & input) = 0;
 
     /*
      * Backwards-propagates (recursively to nested components) input matrix representing a batch of
-     * observations derivatives w. r. to this modules outputs..
+     * observations derivatives w. r. to this modules outputs.
      * Usually first dimension indices the observations and second dimension is the derivative
      * dimensionality.
-     * Method must populate this->modelGrad and this->inputGrad
-     * Returns pointer to this->modelGrad owned by this object.
+     * Implementation must populate this->modelGrad and this->inputGrad for objects that have it.
+     * Returns pointer to this->inputGrad owned by this object or nullptr for objects without
+     * this->inputGrad.
      */
-    virtual arma::Mat<T> * backwards(const arma::Mat<T> & deltaUpper) = 0;
+    virtual arma::Mat<TX> * backwards(const arma::Mat<T> & deltaUpper) = 0;
 
     inline const arma::Mat<T> & getOutput() const {
         return this->y;
     }
 
+    /**
+     * @return pointer to the gradient w.r. to inputs.
+     * Returned pointed object and enclosed memory owned by this object, caller may not delete it.
+     */
+    inline arma::Mat<TX> * getInputGradient() {
+        static_assert(std::is_floating_point<TX>::value, "TX must be floating point type");
+        return &inputGrad;
+    }
+
+    inline const arma::Mat<TX> * getInput() const {
+        return this->x;
+    }
+
+    /**
+     * @return dimensionality of input to this layer (for a single observation).
+     */
+    virtual uint32_t getDimX() const = 0;
+
 protected:
+    /** unused for non-differentiable inputs */
+    arma::Mat<TX> inputGrad;
+    const arma::Mat<TX> * x;  // not owned by this object
     arma::Mat<T> y;
 };
 
 
 /**
- * Networks that remember state from previous batch.
+ * Networks that remember state from previous batch, such as RNNs.
  * Extends interface to reset and set that state.
  */
-template <typename T>
-class ComponentNNwithMemory : public ComponentNN<T> {
+template <typename TX, typename T>
+class ComponentNNwithMemory : public ComponentNN<TX, T> {
 
 public:
-    ComponentNNwithMemory(uint32_t numP_) : ComponentNN<T>(numP_) { }
+    ComponentNNwithMemory(uint32_t numP_) : ComponentNN<TX, T>(numP_) { }
 
     virtual ~ComponentNNwithMemory() { }
 
@@ -282,19 +293,24 @@ public:
 
 /**
  * Neural Network with top-layer a scalar loss function for classification or regression.
- * For classification U is usually an (unsigned) integer type, for regression float or double.
- *
- * Wrapper classes that use delegation to objects doing the actual work should inherit from this
- * class directly. Classes directly implementing the actual work should inherit from SkeletalLossNN.
  *
  * This is the highest-level class representing the network and it is the class that the evaluation
  * and training classes operate on.
+ *
+ * For classification TY is usually an (unsigned) integer type, for regression float or double.
+ * INPUT is a type containing the part of the data set to be applied forward and backwards in one
+ * step. It is intentionally left without an interface allowing maximum flexibility to the
+ * implementing classes. For the special case of two-dimensional matrix inputs and differentiable
+ * inputs see {@link LossNNwithInputGrad}
+ *
+ * Intentionally does not expose method for gradient w.r.to inputs as such gradients are not
+ * necessarily always defined.
  */
-template <typename T, typename U>
+template <typename INPUT, typename T, typename TY>
 class LossNN : public CoreNN<T> {
 
 public:
-    LossNN(uint32_t numP_) : CoreNN<T>(numP_) { }
+    LossNN(uint32_t numP_) : CoreNN<T>(numP_), x(nullptr) { }
 
     virtual ~LossNN() { }
 
@@ -303,33 +319,35 @@ public:
     LossNN(LossNN const &&) = delete;
     LossNN & operator=(LossNN const &&) = delete;
 
-    /*
+    /**
      * Forward-propagates (recursively to nested components) input matrix representing a batch
      * of observations.
-     * Usually first dimension indices the observations and second dimension is the observation
+     * Usually first dimension indexes the observations and second dimension is the observation
      * dimensionality.
      * Makes no copy of passed input matrix.
-     * Method must populate this->y.
-     * Returns pointer to this->y owned by this object.
+     * Implementation must populate this->y.
+     * @param input matrix representing a batch  of observations
+     * @return pointer to this->y owned by this object.
      */
-    virtual arma::Mat<T> * forward(const arma::Mat<T> & input) = 0;
+    virtual arma::Mat<T> * forward(const INPUT & input) = 0;
 
     /*
      * Sets true output.
      * Makes no copy of passed matrix.
      */
-    virtual void setTrueOutput(const arma::Mat<U> & outputTrue) = 0;
+    virtual void setTrueOutput(const arma::Mat<TY> & outputTrue) = 0;
 
     /*
      * Assuming the inputs were forward propagated, true outputs were set and loss function was
      * computed, it recursively computes the derivative of loss and back-propagates the error.
      * Backwards-propagate matrix representing a batch of observations and their derivative.
-     * Method must populate this->modelGrad and this->inputGrad
-     * Returns pointer to this->modelGrad owned by this object.
+     * Implementation must populate this->modelGrad and this->inputGrad for objects that have it.
+     * Returns pointer to this->inputGrad owned by this object or nullptr for objects without
+     * this->inputGrad.
      */
-    virtual arma::Mat<T> * backwards() = 0;
+    virtual INPUT * backwards() = 0;
 
-    double forwardBackwards(const arma::Mat<T> & input, const arma::Mat<U> & outputTrue) {
+    double forwardBackwards(const INPUT & input, const arma::Mat<TY> & outputTrue) {
         forward(input);
         setTrueOutput(outputTrue);
         computeLoss();
@@ -337,7 +355,8 @@ public:
         return getLoss();
     }
 
-    double forwardWithLoss(const arma::Mat<T> & input, const arma::Mat<U> & outputTrue) {
+    // note: only called by this and nnAndData.h
+    double forwardWithLoss(const INPUT & input, const arma::Mat<TY> & outputTrue) {
         forward(input);
         setTrueOutput(outputTrue);
         return computeLoss();
@@ -346,60 +365,73 @@ public:
     virtual double getLoss() const = 0;
 
     // get true output
-    virtual const arma::Mat<U> * getTrueOutput() const = 0;
+    virtual const arma::Mat<TY> * getTrueOutput() const = 0;
 
     // get the output of the last layer below the top loss layer
     virtual const arma::Mat<T> * getInputToTopLossLayer() const = 0;
 
-    /*
-     * Used (indirectly) by gradient check only.
-     * Model is assumed to be changed in-place across invocations of this method by gradient check.
-     * Does not change any of inputs x, true labels outputTrue or model.
-     * Implementing classes that desire to use optionalArgs should override this default
-     * implementation, use optionalArgs and invoke the base class method.
-     */
-    virtual std::pair<double, arma::Row<T> *> forwardBackwardsGradModel(
-            const arma::Row<T> * optionalArgs = nullptr) {
-        forward(*(this->x));
-        computeLoss();
-        backwards();
-        return std::pair<double, arma::Row<T> *>(getLoss(), this->getModelGradient());
+    inline const INPUT * getInput() const {
+        return this->x;
     }
-
-    /*
-     * Used (indirectly) by gradient check only.
-     * Input x is assumed to be changed in-place across invocations of this method by gradient check.
-     * Does not change any of inputs x, true labels outputTrue or model.
-     * Implementing classes that desire to use optionalArgs should override this default
-     * implementation, use optionalArgs and invoke the base class method.
-     */
-    virtual std::pair<double, arma::Mat<T> *> forwardBackwardsGradInput(
-            const arma::Row<T> * optionalArgs = nullptr) {
-        forward(*(this->x));
-        computeLoss();
-        backwards();
-        return std::pair<double, arma::Mat<T> *>(getLoss(), this->getInputGradient());
-    }
-
-    // computeLoss() should be protected, except for that clang is confused with ComponentAndLoss's
-    // invocation of computeLoss(); Make protected to see the problem.
 
     virtual double computeLoss() = 0;
+
+    /**
+     * "optional" method with default empty implementation
+     */
+    virtual void resetInitialHiddenState() { }
+
+    /**
+     * "optional" method with default empty implementation
+     */
+    virtual void setInitialHiddenState(const arma::Row<T> & initialState) { }
+
+protected:
+    const INPUT * x;  // not owned by this object
 };
 
 
 /**
- * See instructions in LossNN.
+ * Extension of {@link LossNN} where the input is a matrix and the derivative w.r. to input is
+ * guaranteed to exist.
  */
-template <typename T, typename U>
-class SkeletalLossNN : public LossNN<T, U> {
+template <typename T, typename TY>
+class LossNNwithInputGrad : public LossNN<arma::Mat<T>, T, TY> {
+
+    static_assert(std::is_floating_point<T>::value,
+            "T must be floating point type (for inputGradient to be defined)");
 
 public:
-	SkeletalLossNN(uint32_t numP_) : LossNN<T, U>(numP_), loss(0.0), y(), yTrue(nullptr) { }
+    LossNNwithInputGrad(uint32_t numP_) : LossNN<arma::Mat<T>, T, TY>(numP_) { }
 
-    virtual ~SkeletalLossNN() { }
+    virtual ~LossNNwithInputGrad() { }
 
-    inline virtual void setTrueOutput(const arma::Mat<U> & outputTrue) override {
+    /**
+     * @return gradient of loss function w. r. to input to this layer.
+     */
+    virtual arma::Mat<T> * getInputGradient() = 0;
+
+    /**
+     * @return dimensionality of input to this layer (for a single observation).
+     */
+    virtual uint32_t getDimX() const = 0;
+};
+
+
+/**
+ * Extends with skeletal implementation.
+ * This is the parallel to {@link ComponentNN} with a top scalar loss.
+ */
+template <typename T, typename TY>
+class ComponentLossNN : public LossNNwithInputGrad<T, TY> {
+
+public:
+	ComponentLossNN(uint32_t numP_)
+        : LossNNwithInputGrad<T, TY>(numP_), inputGrad(), loss(0.0), y(), yTrue(nullptr) { }
+
+    virtual ~ComponentLossNN() { }
+
+    inline virtual void setTrueOutput(const arma::Mat<TY> & outputTrue) override {
         yTrue = &outputTrue;
     }
 
@@ -407,14 +439,19 @@ public:
         return loss;
     }
 
-    inline virtual const arma::Mat<U> * getTrueOutput() const override {
+    inline virtual const arma::Mat<TY> * getTrueOutput() const override {
         return this->yTrue;
     }
 
+    inline virtual arma::Mat<T> * getInputGradient() override {
+        return &inputGrad;
+    }
+
 protected:
+    arma::Mat<T> inputGrad;  // underlying buffer managed by inputGrad itself
     double loss;
     arma::Mat<T> y;
-    const arma::Mat<U> * yTrue;  // not owned by this object
+    const arma::Mat<TY> * yTrue;  // not owned by this object
 };
 
 
@@ -431,9 +468,9 @@ class ModelGradientFunctor {
 public:
     virtual ~ModelGradientFunctor() { };
 
-    /*
+    /**
      * Performs one forward and backwards propagation.
-     * Returns loss and pointer to the derivative.
+     * @return pair containing loss and pointer to the model derivative.
      */
     virtual std::pair<double, arma::Row<T> *> operator()() = 0;
 
@@ -466,6 +503,10 @@ class InputGradientFunctor {
 public:
     virtual ~InputGradientFunctor() { };
 
+    /**
+     * Performs one forward and backwards propagation.
+     * @return pair containing loss and pointer to the derivative w. r. to input.
+     */
     virtual std::pair<double, arma::Mat<T> *> operator()() = 0;
 
     InputGradientFunctor() { }
@@ -477,21 +518,27 @@ public:
 };
 
 
-template <typename T, typename U>
+/**
+ * Used for gradient checks.
+ */
+template <typename INPUT, typename T, typename TY>
 class ModelGradientNNFunctor final : public ModelGradientFunctor<T> {
 public:
-    ModelGradientNNFunctor(LossNN<T, U> & lossNN_, const arma::Row<T> * optionalArgs_= nullptr)
-        : ModelGradientFunctor<T>(), lossNN(lossNN_), optionalArgs(optionalArgs_) {
-        if (lossNN.getInput() == nullptr) {
-            throw std::invalid_argument("Input not set");
-        }
-        if (lossNN.getTrueOutput()  == nullptr) {
-            throw std::invalid_argument("TrueOutput not set");
-        }
+    ModelGradientNNFunctor(LossNN<INPUT, T, TY> & lossNN_,
+            const INPUT & x_, const arma::Mat<TY> & yTrue_,
+            const arma::Row<T> * optionalArgs_ = nullptr)
+        : ModelGradientFunctor<T>(), lossNN(lossNN_), x(x_), yTrue(yTrue_), optionalArgs(optionalArgs_) {
+        lossNN.setTrueOutput(yTrue);
     }
 
     std::pair<double, arma::Row<T> *> operator()() override {
-        return lossNN.forwardBackwardsGradModel(optionalArgs);
+        if (optionalArgs != nullptr) {
+            lossNN.setInitialHiddenState(*optionalArgs);
+        }
+        lossNN.forward(x);
+        lossNN.computeLoss();
+        lossNN.backwards();
+        return std::pair<double, arma::Row<T> *>(lossNN.getLoss(), lossNN.getModelGradient());
     }
 
     arma::Row<T> * getModel() override {
@@ -499,29 +546,40 @@ public:
     }
 
 private:
-    LossNN<T, U> & lossNN;
+    LossNN<INPUT, T, TY> & lossNN;
+    const INPUT & x;
+    const arma::Mat<TY> & yTrue;
     const arma::Row<T> * const optionalArgs;
 };
 
 
-template <typename T, typename U>
+/**
+ * Used for gradient checks.
+ */
+template <typename T, typename TY>
 class InputGradientNNFunctor final : public InputGradientFunctor<T> {
 public:
-    InputGradientNNFunctor(LossNN<T,U> & lossNN_, const arma::Row<T> * optionalArgs_= nullptr)
-        : InputGradientFunctor<T>(), lossNN(lossNN_), optionalArgs(optionalArgs_) {
-        if (lossNN.getInput() == nullptr) {
-            throw std::invalid_argument("Input not set");
-        }
-        if (lossNN.getTrueOutput()  == nullptr) {
-            throw std::invalid_argument("TrueOutput not set");
-        }
+    InputGradientNNFunctor(LossNNwithInputGrad<T, TY> & lossNN_,
+            const arma::Mat<T> & x_, const arma::Mat<TY> & yTrue_,
+            const arma::Row<T> * optionalArgs_ = nullptr)
+        : InputGradientFunctor<T>(), lossNN(lossNN_), x(x_), yTrue(yTrue_), optionalArgs(optionalArgs_) {
+        lossNN.setTrueOutput(yTrue);
     }
 
     std::pair<double, arma::Mat<T> *> operator()() {
-        return this->lossNN.forwardBackwardsGradInput(optionalArgs);
+        if (optionalArgs != nullptr) {
+            lossNN.setInitialHiddenState(*optionalArgs);
+        }
+        lossNN.forward(x);
+        lossNN.computeLoss();
+        lossNN.backwards();
+        return std::pair<double, arma::Mat<T> *>(lossNN.getLoss(), lossNN.getInputGradient());
     }
+
 private:
-    LossNN<T, U> & lossNN;
+    LossNNwithInputGrad<T, TY> & lossNN;
+    const arma::Mat<T> & x;
+    const arma::Mat<TY> & yTrue;
     const arma::Row<T> * const optionalArgs;
 };
 
@@ -553,38 +611,9 @@ struct GlorotInitFunctor {
 
 /**
  * Wrapper class for RAII (Resource acquisition is initialization).
- * Use case is automatic allocation and deallocation of enclosed memory buffers
- * when this object is allocated on the stack.
- */
-template <typename T>
-class ModelMemoryManager final {
-
-public:
-    ModelMemoryManager(uint32_t numP_) :
-        numP(numP_), modelBuffer(new T[numP]), gradientBuffer(new T[numP]) { }
-
-    ~ModelMemoryManager() {
-        delete [] modelBuffer;
-        delete [] gradientBuffer;
-    }
-
-    ModelMemoryManager(ModelMemoryManager const &) = delete;
-    ModelMemoryManager & operator=(ModelMemoryManager const &) = delete;
-    ModelMemoryManager(ModelMemoryManager const &&) = delete;
-    ModelMemoryManager & operator=(ModelMemoryManager const &&) = delete;
-
-    const uint32_t numP;
-    T * const modelBuffer;
-    T * const gradientBuffer;
-};
-
-
-/**
- * Yet another wrapper class for RAII (Resource acquisition is initialization).
  * Assumes ownership of passed CoreNN object in constructor and deletes it in destructor.
  * Use case is automatic allocation and deallocation of enclosed memory buffers
  * when this object is allocated on the stack.
- * TODO: Consider merging NNMemoryManager and ModelMemoryManager.
  */
 template <typename T>
 class NNMemoryManager final {
@@ -626,5 +655,6 @@ private:
     T * const modelBuffer;
     T * const gradientBuffer;
 };
+
 
 #endif  // _NEURAL_BASE_H_
