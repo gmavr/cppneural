@@ -1,11 +1,10 @@
-#include <armadillo>
+#include "gradientCheck.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <utility>
-
-#include "gradientCheck.h"
 
 
 template <typename T, typename LG_FUNC, typename MAT>
@@ -20,8 +19,8 @@ bool gradientCheck(LG_FUNC & func, MAT & x, double tolerance, bool debugOn) {
     printf("Starting gradient check. Number parameters: %u\n", (unsigned)gradient.n_elem);
 
     if (debugOn) {
-        printf("loss=%f\n", fx);
-        gradient.print("starting gradient:");
+        printf("loss=%.7g\n", fx);
+        // gradient.print("starting gradient:");
     }
 
     const double h = 1e-5;
@@ -31,30 +30,28 @@ bool gradientCheck(LG_FUNC & func, MAT & x, double tolerance, bool debugOn) {
 
         if (debugOn) {
             printf("x.memptr()=%p iter=%p\n", x.memptr(), iter);
-            printf("*x.memptr(%u)=%f *iter=%f\n", i, *(x.memptr() + i), *iter);
+            printf("*x.memptr(%u)=%.6g *iter=%.6g\n", i, *(x.memptr() + i), *iter);
         }
 
-        (*iter) = originalValue + h;
+        *iter = originalValue + h;
         ret = func();
         const double fx2 = ret.first;
 
         if (debugOn) {
-            printf("loss=%f\n", fx2);
-            printf("*x.memptr(%u)=%f *iter=%f\n", i, *(x.memptr() + i), *iter);
-            // x.print(); // the output of this is stale because compiler optimizes it as non-changed!
+            printf("loss=%.7g\n", fx2);
+            printf("*x.memptr(%u)=%.6g *iter=%.6g\n", i, *(x.memptr() + i), *iter);
         }
 
-        (*iter) = originalValue - h;
+        *iter = originalValue - h;
         ret = func();
         const double fx1 = ret.first;
 
         if (debugOn) {
-            printf("loss=%f\n", fx1);
-            printf("*x.memptr(%u)=%f *iter=%f\n", i, *(x.memptr() + i), *iter);
-            // x.print(); // the output of this is stale because compiler optimizes it as non-changed!
+            printf("loss=%.7g\n", fx1);
+            printf("*x.memptr(%u)=%.6g *iter=%.6g\n", i, *(x.memptr() + i), *iter);
         }
 
-        (*iter) = originalValue;
+        *iter = originalValue;
 
         // compute the numerical gradient on the current coordinate (partial derivative w.r.to current coordinate)
         const double numericalGradient = (fx2 - fx1) / (2*h);

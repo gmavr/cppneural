@@ -29,10 +29,7 @@ void testGradients() {
 
     arma::Mat<double> x = arma::randn<arma::Mat<double>>(dimX, seqLength);
     const arma::Row<int32_t> yTrue = arma::randi<arma::Row<int32_t>>(seqLength, arma::distr_param(0, dimK - 1));
-
-    arma::Row<double> initialState(dimH);
-    initialState.randn();
-    initialState *= 0.01;
+    const arma::Row<double> initialState = 0.01 * arma::randn<arma::Row<double>>(dimH);
 
     const double tolerance = 1e-8;
 
@@ -60,10 +57,7 @@ void showRunningTime() {
 
     const arma::Mat<double> x = arma::randn<arma::Mat<double>>(dimX, seqLength);
     const arma::Mat<double> deltaUpper = arma::randn<arma::Mat<double>>(dimH, seqLength);
-
-    arma::Row<double> initialState(dimH);
-    initialState.randn();
-    initialState *= 0.01;
+    const arma::Row<double> initialState = 0.01 * arma::randn<arma::Row<double>>(dimH);
 
     rnn->setInitialHiddenState(initialState);
     rnn->forward(x);

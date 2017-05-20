@@ -111,7 +111,7 @@ public:
         return dimX;
     }
 
-    uint32_t getDimY() const {
+    uint32_t getDimY() const override {
         return dimY;
     }
 
@@ -247,7 +247,7 @@ public:
         return dimX;
     }
 
-    uint32_t getDimY() const {
+    uint32_t getDimY() const override {
         return dimY;
     }
 

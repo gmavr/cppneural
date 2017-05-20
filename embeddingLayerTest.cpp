@@ -16,9 +16,8 @@ void manualTestGradient() {
 
     em->getModel()->randn();
 
-    arma::Col<arma::uword> x = { 1, 0, 1, 9, 8 };
-    arma::Mat<float> deltaErr(dimD, n);
-    deltaErr.randn();
+    const arma::Col<arma::uword> x = { 1, 0, 1, 9, 8 };
+    const arma::Mat<float> deltaErr = arma::randn<arma::Mat<float>>(dimD, n);
 
     em->forward(x);
     em->backwards(deltaErr);
@@ -105,8 +104,7 @@ void testGradient() {
 
     lossNN->getModel()->randn();
 
-    arma::Mat<double> yTrue(dimD, n);
-    yTrue.randn();
+    const arma::Mat<double> yTrue= arma::randn<arma::Mat<double>>(dimD, n);
     const arma::Col<arma::uword> x = arma::randi<arma::Col<arma::uword>>(n, arma::distr_param(0, dimK - 1));
 
     const double tolerance = 1e-8;
@@ -126,10 +124,9 @@ void showRunningTime() {
     CEL2embeddingLossNN<double> * lossNN = new CEL2embeddingLossNN<double>(emLayer);
     NNMemoryManager<double> nnManager(lossNN);
 
-    lossNN->getModel()->randu();
+    lossNN->getModel()->randn();
 
-    arma::Mat<double> yTrue(dimD, n);
-    yTrue.randn();
+    const arma::Mat<double> yTrue= arma::randn<arma::Mat<double>>(dimD, n);
     const arma::Col<arma::uword> x = arma::randi<arma::Col<arma::uword>>(n, arma::distr_param(0, dimK - 1));
 
     auto startTime = std::chrono::steady_clock::now();

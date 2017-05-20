@@ -162,7 +162,7 @@ public:
         return dimX;
     }
 
-    uint32_t getDimH() const {
+    uint32_t getDimY() const override {
         return dimH;
     }
 
@@ -375,7 +375,7 @@ public:
         return dimX;
     }
 
-    uint32_t getDimH() const {
+    uint32_t getDimY() const override {
         return dimH;
     }
 
@@ -593,7 +593,7 @@ public:
         return dimX;
     }
 
-    uint32_t getDimH() const {
+    uint32_t getDimY() const {
         return dimH;
     }
 

@@ -265,6 +265,11 @@ public:
      */
     virtual uint32_t getDimX() const = 0;
 
+    /**
+     * @return dimensionality of output of this layer (for a single observation).
+     */
+    virtual uint32_t getDimY() const = 0;
+
 protected:
     /** unused for non-differentiable inputs */
     arma::Mat<TX> inputGrad;

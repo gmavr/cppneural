@@ -11,7 +11,8 @@ public:
     EmbeddingLayer(arma::uword dimK_, uint32_t dimD_, bool assertsOn_ = true)
      : ComponentNN<arma::uword, T>(dimK_ * dimD_),
        dimK(dimK_), dimD(dimD_), assertsOn(assertsOn_),
-       emMatrix(nullptr), dEmMatrix(nullptr), xPrev() { }
+       emMatrix(nullptr), dEmMatrix(nullptr), xPrev(),
+       denseThreshold((uint32_t)(0.2 * dimK * dimD)) { }
 
     ~EmbeddingLayer() {
         delete emMatrix;
@@ -45,25 +46,34 @@ public:
             }
         }
 
-        // Reset to 0 only the derivative elements that were previously non-zero.
-        // For large vocabularies, it is faster than setting all to 0.
         if (xPrev.n_elem > 0) {
+            // Reset to 0 only the derivative elements that were previously non-zero.
+            // For large vocabularies, it is faster than setting all to 0.
             for (arma::uword i = 0; i < xPrev.n_elem; i++) {
                 dEmMatrix->col(xPrev.at(i)).zeros();
             }
         } else {
             dEmMatrix->zeros();
         }
-        xPrev = *this->x; // private copy of x, ok if duplicate indices inside x
+
+        if (deltaUpper.n_cols < denseThreshold) {
+            xPrev = *this->x; // private copy of x, ok if duplicate indices inside x
+        } else {
+            xPrev.reset();
+        }
 
         for (arma::uword i = 0; i < n; i++) {
-            dEmMatrix->col(xPrev.at(i)) += deltaUpper.col(i);
+            dEmMatrix->col(this->x->at(i)) += deltaUpper.col(i);
         }
 
         return nullptr;  // derivative w. r. to non-continuous quantities is undefined
     }
 
     uint32_t getDimX() const override {
+        return 1;
+    }
+
+    uint32_t getDimY()  const override {
         return dimD;
     }
 
@@ -87,7 +97,6 @@ private:
         unpackModelOrGrad(this->getModelGradient(), &dEmMatrix);
     }
 
-
 private:
     const arma::uword dimK;
     const uint32_t dimD;
@@ -95,6 +104,10 @@ private:
     arma::Mat<T> * emMatrix;
     arma::Mat<T> * dEmMatrix;
     arma::Mat<arma::uword> xPrev;  // for efficient impl of backwards
+    // this threshold is reasonable but arbitrary, no attempt to determine it by measurements.
+    // For num_samples << dimK * dimD it was found clearly advantageous to zero out only the
+    // necessary parts of gradient instead of the full gradient array.
+    const uint32_t denseThreshold;
 };
 
 

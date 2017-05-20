@@ -91,10 +91,7 @@ void testGradients() {
 
     arma::Mat<double> x = arma::randn<arma::Mat<double>>(seqLength, dimX);
     const arma::Col<int32_t> yTrue = arma::randi<arma::Col<int32_t>>(seqLength, arma::distr_param(0, dimK - 1));
-
-    arma::Row<double> initialState(dimH);
-    initialState.randn();
-    initialState *= 0.01;
+    const arma::Row<double> initialState = 0.01 * arma::randn<arma::Row<double>>(dimH);
 
     bool gcPassed;
     ModelGradientNNFunctor<arma::Mat<double>, double, int32_t> mgf(*rnnsf1, x, yTrue, &initialState);
@@ -165,10 +162,7 @@ void showRunningTime() {
 
     const arma::Mat<double> x = arma::randn<arma::Mat<double>>(seqLength, dimX);
     const arma::Mat<double> deltaUpper = arma::randn<arma::Mat<double>>(seqLength, dimH);
-
-    arma::Row<double> initialState(dimH);
-    initialState.randn();
-    initialState *= 0.01;
+    const arma::Row<double> initialState = 0.01 * arma::randn<arma::Row<double>>(dimH);
 
     rnn1->setInitialHiddenState(initialState);
     rnn1->forward(x);

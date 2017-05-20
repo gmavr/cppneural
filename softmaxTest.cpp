@@ -108,8 +108,7 @@ void testGradient() {
     const arma::uword n = 20;
     const double tolerance = 1e-8;
 
-    arma::Mat<double> x(n, dimX);
-    x.randn();
+    arma::Mat<double> x = arma::randn<arma::Mat<double>>(n, dimX);
     const arma::Col<uint32_t> yTrue = arma::randi<arma::Col<uint32_t>>(n, arma::distr_param(0, dimK - 1));
 
     CESoftmaxNNbyRow<double, uint32_t> * lossNN
